@@ -843,7 +843,7 @@ async function renderBoard(positions) {
       const overdue = p.deadline && p.deadline < today();
       html += `<tr data-pid="${p.id}">
         <td><strong>${escapeHtml(p.position)}</strong>${overdue?' <span style="color:var(--danger);font-size:11px">逾期</span>':''}</td>
-        <td>${escapeHtml(p.dept)}</td><td>${p.headcount}</td>
+        <td>${escapeHtml(p.dept)}</td><td><input type="number" value="${p.headcount||1}" min="1" style="width:50px;text-align:center;padding:4px;border:1px solid transparent;border-radius:4px;font-size:13px;background:transparent" onchange="updatePositionHeadcount('${p.id}', parseInt(this.value)||1)" onfocus="this.style.borderColor='var(--primary)';this.style.background='#fff'" onblur="this.style.borderColor='transparent';this.style.background='transparent'" title="点击修改需求人数"></td>
         <td style="color:${overdue?'var(--danger)':'var(--text)'}">${p.deadline||'-'}</td>
         <td class="batch-cell">${p.stages.resumeScreen||0}</td>
         <td class="batch-cell">${p.stages.firstInterview||0}</td>
@@ -906,6 +906,13 @@ async function saveBatchEdit() {
     await render();
     showToast('批量修改已保存 (' + ids.length + ' 个岗位)');
   } catch(e) { showToast(e.message); }
+}
+
+async function updatePositionHeadcount(id, headcount) {
+  try {
+    await apiPut('/api/positions/' + id, { headcount });
+    showToast('需求人数已更新');
+  } catch(e) { showToast(e.message, 1500); }
 }
 
 async function showAddPosition() {
