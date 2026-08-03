@@ -2032,7 +2032,9 @@ async function handlePositionUpload(event) {
     return {
       position: r['岗位'] || r['position'] || '',
       dept: r['部门'] || r['dept'] || '',
-      headcount: r['需求'] || r['headcount'] || '1',
+      headcount: (r['需求'] !== undefined && r['需求'] !== '') ? r['需求'] :
+                 (r['需求人数'] !== undefined && r['需求人数'] !== '') ? r['需求人数'] :
+                 (r['headcount'] !== undefined && r['headcount'] !== '') ? r['headcount'] : '1',
       deadline: r['截止'] || r['deadline'] || '',
       stages: Object.keys(stages).length > 0 ? stages : undefined
     };

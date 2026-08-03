@@ -393,7 +393,8 @@ app.post('/api/positions/batch-import', authMiddleware, adminOnly, (req, res) =>
     if (existing) {
       // Update existing
       if (item.dept !== undefined) existing.dept = item.dept;
-      if (item.headcount !== undefined) existing.headcount = parseInt(item.headcount) || existing.headcount;
+      if (item.headcount !== undefined) existing.headcount = parseInt(item.headcount, 10);
+      if (isNaN(existing.headcount) || existing.headcount < 0) existing.headcount = 1;
       if (item.deadline !== undefined) existing.deadline = item.deadline;
       if (item.stages) {
         existing.stages = { ...existing.stages, ...item.stages };
