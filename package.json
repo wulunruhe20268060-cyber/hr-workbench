@@ -1,0 +1,12 @@
+{
+  "name": "hr-workspace-team",
+  "version": "2.0.0",
+  "description": "HR全流程工作台 - 团队协作版",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
