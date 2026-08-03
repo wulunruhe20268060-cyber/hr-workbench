@@ -968,6 +968,11 @@ migrateHires();
 migrateInterviews();
 seedDb();
 
+// Health endpoint for Render wake-up + monitoring
+app.get('/health', (req, res) => {
+  res.json({ ok: true, ts: Date.now(), interviews: db.interviews.length, positions: db.positions.length });
+});
+
 app.listen(PORT, () => {
   console.log(`HR Workbench server running on http://localhost:${PORT}`);
   console.log(`Admin: ${ADMIN_USERNAME} / ${ADMIN_PASSWORD}`);
