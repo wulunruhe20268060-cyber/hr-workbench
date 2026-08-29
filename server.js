@@ -4,33 +4,80 @@ const path = require('path');
 const crypto = require('crypto');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const DB_PATH = path.join(__dirname, 'data', 'db.json');
+const PORT = process.env.PORT || 80;
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const DB_PATH = path.join(DATA_DIR, 'db.json');
 const ADMIN_USERNAME = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASS || 'admin123';
 
 // ========== Middleware ==========
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.disable('etag');
 
 // ========== Database ==========
-let db = { users: [], positions: [], interviews: [], todos: [], templates: [], hires: [], progress: [] };
+let db = { users: [], positions: [], interviews: [], todos: [], templates: [], hires: [], progress: [], contracts: [] };
 let tokens = {};
+
+// ---- Postgres (optional): used when DATABASE_URL is set, else falls back to JSON file ----
+// On Koyeb free tier, attach the free Postgres database and set DATABASE_URL to persist data
+// across redeploys. Any Postgres error automatically degrades to the file store (no crash).
+let pgClient = null;
+let usePg = false;
 
 function loadDb() {
   try {
     if (fs.existsSync(DB_PATH)) {
       db = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
     }
-  } catch(e) { console.error('DB load error:', e.message); }
+  } catch (e) { console.error('DB load error:', e.message); }
 }
-function saveDb() {
+
+// Load db from Postgres (if DATABASE_URL) or local file (fallback)
+async function initStore() {
+  if (process.env.DATABASE_URL) {
+    try {
+      const pg = require('pg');
+      pgClient = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+      await pgClient.connect();
+      await pgClient.query('CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)');
+      const r = await pgClient.query("SELECT value FROM kv WHERE key='db'");
+      if (r.rows.length > 0) {
+        db = JSON.parse(r.rows[0].value);
+        console.log('DB loaded from Postgres');
+      } else {
+        console.log('No DB row in Postgres, will seed on first save');
+      }
+      usePg = true;
+      return;
+    } catch (e) {
+      console.error('Postgres init failed, falling back to file store:', e.message);
+      usePg = false;
+    }
+  }
+  loadDb();
+}
+
+// Save db -> Postgres (if active) or local file (fallback). Fire-and-forget safe.
+async function saveDb() {
+  try {
+    if (usePg && pgClient) {
+      await pgClient.query(
+        "INSERT INTO kv(key,value) VALUES('db',$1) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",
+        [JSON.stringify(db)]
+      );
+      return;
+    }
+  } catch (e) {
+    console.error('PG save error:', e.message);
+  }
+  // file fallback
   try {
     const dir = path.dirname(DB_PATH);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(DB_PATH + '.tmp', JSON.stringify(db, null, 2), 'utf8');
     fs.renameSync(DB_PATH + '.tmp', DB_PATH);
-  } catch(e) { console.error('DB save error:', e.message); }
+  } catch (e) { console.error('DB save error:', e.message); }
 }
 
 function hashPass(password, salt) {
@@ -187,6 +234,13 @@ function seedDb() {
       totalEntry: 0, shortage: 2, completion: '0%', notes: '', createdBy: adminId, createdAt: now }
   ];
 
+  // Contracts (labor contracts)
+  db.contracts = [
+    { id: genId(), seq: 1, name: '李明', dept: '技术部', entryDate: '2026-07-01', signDate: '2026-07-01', duration: 1, endDate: '2027-07-01', signUnit: 'HR工作台有限公司', notes: '', createdBy: m1Id, createdAt: ys },
+    { id: genId(), seq: 2, name: '王芳', dept: '人力资源部', entryDate: '2026-06-01', signDate: '2026-06-01', duration: 3, endDate: '2029-06-01', signUnit: 'HR工作台有限公司', notes: '三年期', createdBy: m1Id, createdAt: ys },
+    { id: genId(), seq: 3, name: '测试员工', dept: '市场部', entryDate: '2026-07-01', signDate: '2026-07-01', duration: 1, endDate: '2026-08-08', signUnit: 'HR工作台有限公司', notes: '即将到期，需催办', createdBy: m1Id, createdAt: ys }
+  ];
+
   saveDb();
   console.log('Database seeded with sample data');
   console.log(`Admin: ${ADMIN_USERNAME} / ${ADMIN_PASSWORD}`);
@@ -216,6 +270,13 @@ function authMiddleware(req, res, next) {
 function adminOnly(req, res, next) {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ error: '仅管理员可操作' });
+  }
+  next();
+}
+
+function contractAccess(req, res, next) {
+  if (req.user.role !== 'admin' && req.user.role !== 'contract_admin') {
+    return res.status(403).json({ error: '无合同管理权限' });
   }
   next();
 }
@@ -272,7 +333,7 @@ app.get('/api/users', authMiddleware, adminOnly, (req, res) => {
 });
 
 app.post('/api/users', authMiddleware, adminOnly, (req, res) => {
-  const { username, displayName, password } = req.body;
+  const { username, displayName, password, role } = req.body;
   if (!username || !password) {
     return res.status(400).json({ error: '用户名和密码不能为空' });
   }
@@ -280,9 +341,10 @@ app.post('/api/users', authMiddleware, adminOnly, (req, res) => {
     return res.status(400).json({ error: '用户名已存在' });
   }
   const salt = genSalt();
+  const userRole = role === 'contract_admin' ? 'contract_admin' : 'member';
   const user = {
     id: genId(), username, displayName: displayName || username,
-    role: 'member', salt, password: hashPass(password, salt),
+    role: userRole, salt, password: hashPass(password, salt),
     createdAt: new Date().toISOString().split('T')[0]
   };
   db.users.push(user);
@@ -333,6 +395,10 @@ app.put('/api/me/password', authMiddleware, (req, res) => {
 // ========== Helper: filter by user ==========
 function filterByUser(arr, userId, role) {
   if (role === 'admin') return arr;
+  // contract_admin sees system items + own items
+  if (role === 'contract_admin') {
+    return arr.filter(item => item.createdBy === userId || item.createdBy === 'system');
+  }
   return arr.filter(item => item.createdBy === userId);
 }
 
@@ -378,6 +444,15 @@ app.delete('/api/positions/:id', authMiddleware, adminOnly, (req, res) => {
   db.positions = db.positions.filter(p => p.id !== req.params.id);
   saveDb();
   res.json({ ok: true });
+});
+
+app.post('/api/positions/batch-delete', authMiddleware, adminOnly, (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: '请提供要删除的ID' });
+  const before = db.positions.length;
+  db.positions = db.positions.filter(p => !ids.includes(p.id));
+  saveDb();
+  res.json({ ok: true, removed: before - db.positions.length });
 });
 
 // Batch import positions from CSV/array
@@ -463,6 +538,39 @@ app.post('/api/interviews/batch', authMiddleware, (req, res) => {
   res.json({ count: added.length });
 });
 
+// Batch upsert: update existing (by phone or name+position) or add new
+app.post('/api/interviews/batch-upsert', authMiddleware, (req, res) => {
+  const { items } = req.body;
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: '请提供有效的面试数据' });
+  }
+  const now = new Date().toISOString().split('T')[0];
+  let updated = 0, added = 0;
+  items.forEach(item => {
+    // Match by phone first, then by name+position
+    let existing = null;
+    if (item.phone) {
+      existing = db.interviews.find(iv =>
+        iv.phone === item.phone && (iv.createdBy === req.userId || req.user.role === 'admin')
+      );
+    }
+    if (!existing && item.name && item.position) {
+      existing = db.interviews.find(iv =>
+        iv.name === item.name && iv.position === item.position && (iv.createdBy === req.userId || req.user.role === 'admin')
+      );
+    }
+    if (existing) {
+      Object.assign(existing, item, { updatedAt: now });
+      updated++;
+    } else {
+      db.interviews.unshift({ id: genId(), ...item, createdBy: req.userId, createdAt: now });
+      added++;
+    }
+  });
+  saveDb();
+  res.json({ added, updated });
+});
+
 app.put('/api/interviews/:id', authMiddleware, (req, res) => {
   const idx = db.interviews.findIndex(iv => iv.id === req.params.id);
   if (idx < 0) return res.status(404).json({ error: '面试记录不存在' });
@@ -488,6 +596,112 @@ app.delete('/api/interviews/:id', authMiddleware, (req, res) => {
   saveDb();
   res.json({ ok: true });
 });
+
+app.post('/api/interviews/batch-delete', authMiddleware, (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: '请提供要删除的ID' });
+  const before = db.interviews.length;
+  if (req.user.role === 'admin') {
+    db.interviews = db.interviews.filter(iv => !ids.includes(iv.id));
+  } else {
+    db.interviews = db.interviews.filter(iv => !ids.includes(iv.id) || iv.createdBy !== req.userId);
+  }
+  saveDb();
+  res.json({ ok: true, removed: before - db.interviews.length });
+});
+
+// ========== Contracts (Labor Contracts) ==========
+app.get('/api/contracts', authMiddleware, contractAccess, (req, res) => {
+  res.json(db.contracts || []);
+});
+
+app.post('/api/contracts', authMiddleware, contractAccess, (req, res) => {
+  const ct = computeEndDate({ id: genId(), ...req.body, createdBy: req.userId, createdAt: new Date().toISOString().split('T')[0] });
+  if (!db.contracts) db.contracts = [];
+  db.contracts.unshift(ct);
+  saveDb();
+  syncContractTodos();
+  res.json(ct);
+});
+
+app.post('/api/contracts/batch', authMiddleware, contractAccess, (req, res) => {
+  const { items } = req.body;
+  if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: '请提供数据' });
+  if (!db.contracts) db.contracts = [];
+  const now = new Date().toISOString().split('T')[0];
+  const added = items.map((item, i) => computeEndDate({ id: genId(), seq: item.seq || (i + 1), ...item, createdBy: req.userId, createdAt: now }));
+  db.contracts.unshift(...added);
+  saveDb();
+  syncContractTodos();
+  res.json({ count: added.length });
+});
+
+app.put('/api/contracts/:id', authMiddleware, contractAccess, (req, res) => {
+  if (!db.contracts) db.contracts = [];
+  const idx = db.contracts.findIndex(c => c.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: '合同不存在' });
+  db.contracts[idx] = computeEndDate({ ...db.contracts[idx], ...req.body });
+  saveDb();
+  syncContractTodos();
+  res.json(db.contracts[idx]);
+});
+
+app.delete('/api/contracts/:id', authMiddleware, contractAccess, (req, res) => {
+  if (!db.contracts) db.contracts = [];
+  db.contracts = db.contracts.filter(c => c.id !== req.params.id);
+  saveDb();
+  syncContractTodos();
+  res.json({ ok: true });
+});
+
+app.post('/api/contracts/batch-delete', authMiddleware, contractAccess, (req, res) => {
+  if (!db.contracts) db.contracts = [];
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: '请提供要删除的ID' });
+  const before = db.contracts.length;
+  db.contracts = db.contracts.filter(c => !ids.includes(c.id));
+  saveDb();
+  syncContractTodos();
+  res.json({ ok: true, removed: before - db.contracts.length });
+});
+
+// Auto-sync contract expiry to todos
+function syncContractTodos() {
+  if (!db.contracts || db.contracts.length === 0) return;
+  const today = new Date(); today.setHours(0,0,0,0);
+  // Remove old auto-generated contract todos
+  db.todos = db.todos.filter(t => !t._autoContractId);
+  
+  db.contracts.forEach(ct => {
+    if (!ct.endDate) return;
+    const endDate = new Date(ct.endDate); endDate.setHours(0,0,0,0);
+    const daysUntil = Math.ceil((endDate - today) / 86400000);
+    // Create reminder todo 7 days before expiry
+    if (daysUntil <= 15 && daysUntil >= 0) {
+      const dueDate = new Date(today);
+      dueDate.setDate(dueDate.getDate() + Math.max(0, daysUntil));
+      db.todos.push({
+        id: genId(), title: `📋 ${ct.name} 合同${daysUntil===0?'今天':daysUntil+'天后'}到期 (${ct.endDate})`,
+        frequency: '日', priority: daysUntil <= 3 ? 'P0' : 'P1',
+        dueDate: dueDate.toISOString().split('T')[0], completed: false,
+        createdBy: 'system', createdAt: today.toISOString().split('T')[0],
+        _autoContractId: ct.id
+      });
+    }
+  });
+  saveDb();
+}
+
+// Auto-compute endDate from signDate + duration if missing
+function computeEndDate(item) {
+  if (item.endDate) return item;
+  if (item.signDate && item.duration && !isNaN(parseInt(item.duration))) {
+    const d = new Date(item.signDate);
+    d.setFullYear(d.getFullYear() + parseInt(item.duration));
+    item.endDate = d.toISOString().split('T')[0];
+  }
+  return item;
+}
 
 // ========== Todos ==========
 app.get('/api/todos', authMiddleware, (req, res) => {
@@ -909,6 +1123,7 @@ app.get('/api/export', authMiddleware, adminOnly, (req, res) => {
     templates: db.templates,
     hires: db.hires,
     progress: db.progress,
+    contracts: db.contracts || [],
     exportedAt: new Date().toISOString(),
     version: '2.0'
   };
@@ -924,6 +1139,7 @@ app.post('/api/import', authMiddleware, adminOnly, (req, res) => {
   if (data.templates) { db.templates = data.templates; count += data.templates.length; }
   if (data.hires) { db.hires = data.hires; count += data.hires.length; }
   if (data.progress) { db.progress = data.progress; count += data.progress.length; }
+  if (data.contracts) { db.contracts = data.contracts; count += data.contracts.length; }
   saveDb();
   res.json({ count });
 });
@@ -963,19 +1179,57 @@ function migrateInterviews() {
   if (migrated) { saveDb(); console.log('Migrated interviews to new schema'); }
 }
 
+// Migrate templates: ensure every template has a category field
+function migrateTemplates() {
+  let migrated = false;
+  db.templates.forEach(t => {
+    if (!t.category) {
+      // Auto-categorize based on name
+      const name = t.name || '';
+      if (name.includes('销售') || name.includes('商务') || name.includes('BD')) t.category = '销售';
+      else if (name.includes('顾问') || name.includes('咨询')) t.category = '顾问';
+      else if (name.includes('技术') || name.includes('前端') || name.includes('开发') || name.includes('工程师')) t.category = '技术';
+      else if (name.includes('运营')) t.category = '运营';
+      else if (name.includes('管理') || name.includes('总监') || name.includes('经理')) t.category = '管理';
+      else t.category = '未分类';
+      migrated = true;
+    }
+  });
+  if (migrated) { saveDb(); console.log('Migrated templates: added category field'); }
+}
+
 // ========== Start ==========
-loadDb();
-migrateHires();
-migrateInterviews();
-seedDb();
+(async () => {
+  await initStore();
+  if (!db.contracts) db.contracts = [];
+  migrateHires();
+  migrateInterviews();
+  migrateTemplates();
+  seedDb();
 
-// Health endpoint for Render wake-up + monitoring
-app.get('/health', (req, res) => {
-  res.json({ ok: true, ts: Date.now(), interviews: db.interviews.length, positions: db.positions.length });
+  // Health endpoint for Koyeb/Render wake-up + monitoring
+  app.get('/health', (req, res) => {
+    res.json({ ok: true, ts: Date.now(), store: usePg ? 'postgres' : 'file', interviews: db.interviews.length, positions: db.positions.length });
+  });
+
+  app.listen(PORT, () => {
+    console.log(`HR Workbench server running on http://localhost:${PORT} (store: ${usePg ? 'postgres' : 'file'})`);
+    console.log(`Admin: ${ADMIN_USERNAME} / ${ADMIN_PASSWORD}`);
+    console.log(`Member demo: zhangwei / 123456`);
+  }).on('clientError', (err, socket) => {
+    // Suppress parse errors from browsers sending extra data (harmless noise)
+    if (!err.message || !err.message.includes('Parse Error')) {
+      console.error('clientError:', err.message);
+    }
+    socket.destroy();
+  });
+})();
+
+// Prevent unhandled rejections/exceptions from crashing the server
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled Rejection:', reason && reason.message || reason);
 });
-
-app.listen(PORT, () => {
-  console.log(`HR Workbench server running on http://localhost:${PORT}`);
-  console.log(`Admin: ${ADMIN_USERNAME} / ${ADMIN_PASSWORD}`);
-  console.log(`Member demo: zhangwei / 123456`);
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err.message);
+  // Don't exit - let PM2 handle restart if needed
 });

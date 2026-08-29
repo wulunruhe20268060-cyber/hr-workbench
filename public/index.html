@@ -175,6 +175,20 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 .pos-table th,.interview-table th{text-align:left;padding:10px 8px;font-size:12px;color:var(--text2);font-weight:600;border-bottom:2px solid var(--border);white-space:nowrap}
 .pos-table td,.interview-table td{padding:10px 8px;border-bottom:1px solid var(--border);vertical-align:top}
 .pos-table tr:hover,.interview-table tr:hover{background:#f8fafc}
+/* Sticky columns for interview table */
+.sticky-col{position:sticky;left:40px;z-index:2;width:44px;min-width:44px}
+.sticky-col2{position:sticky;left:84px;z-index:2;min-width:60px}
+.interview-table th.sticky-col,
+.interview-table th.sticky-col2{z-index:3;background:#f1f5f9}
+.interview-table td.sticky-col,
+.interview-table td.sticky-col2{background:#fff}
+.interview-table tr:hover td.sticky-col,
+.interview-table tr:hover td.sticky-col2{background:#f8fafc}
+/* Pagination */
+.pagination{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:4px;padding:12px 0;margin-top:8px;border-top:1px solid var(--border)}
+.pagination .active-page{background:var(--primary);color:#fff}
+.batch-delete-bar{animation:fadeIn .2s}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
 /* Tags */
 .tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:500}
 .tag-pass{background:#d1fae5;color:#065f46}
@@ -214,6 +228,14 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 .template-card:hover{border-color:var(--primary)}
 .template-card h4{font-size:15px;margin-bottom:4px}
 .template-card .q-list{font-size:12px;color:var(--text2)}
+.category-group{margin-bottom:8px}
+.category-header{padding:10px 12px;background:#f8fafc;border-radius:8px;cursor:pointer;user-select:none;transition:background .15s;border:1px solid var(--border)}
+.category-header:hover{background:#f1f5f9}
+.category-toggle{font-size:10px;color:var(--text2);width:14px;display:inline-block;transition:transform .2s}
+.category-group.open .category-toggle{transform:rotate(0deg)}
+.category-group:not(.open) .category-toggle{transform:rotate(0deg)}
+.category-body{padding:8px 0 0 0;max-height:2000px;overflow:hidden;transition:max-height .3s ease}
+.category-group:not(.open) .category-body{max-height:0;padding:0}
 .hire-card{background:var(--card);border-radius:8px;padding:14px;margin-bottom:8px;border:1px solid var(--border)}
 .hire-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px}
 .hire-card-header h4{font-size:15px}
@@ -384,6 +406,10 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/><circle cx="14" cy="14" r="3" fill="currentColor"/></svg>
       招聘进度
     </button>
+    <button class="sidebar-item contract-only" data-tab="5" onclick="switchTab(5)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      合同台账
+    </button>
   </div>
 </div>
 
@@ -421,6 +447,10 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
   <button class="tab-btn-mobile" data-tab="4">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/><circle cx="14" cy="14" r="3" fill="currentColor"/></svg>
     进度
+  </button>
+  <button class="tab-btn-mobile contract-only-mobile" data-tab="5">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    合同
   </button>
 </div>
 
@@ -538,9 +568,18 @@ function showLogin() {
 
 function updateHeader() {
   const badge = document.getElementById('userBadge');
-  badge.innerHTML = `${auth.displayName} <span class="role-tag ${auth.role}">${auth.role==='admin'?'管理员':'成员'}</span>`;
+  const roleLabel = auth.role === 'admin' ? '管理员' : auth.role === 'contract_admin' ? '合同管理员' : '成员';
+  badge.innerHTML = `${auth.displayName} <span class="role-tag ${auth.role}">${roleLabel}</span>`;
   badge.className = 'user-badge' + (isAdmin() ? ' admin' : '');
   document.getElementById('btnTeam').style.display = isAdmin() ? '' : 'none';
+  // Show/hide contract tab based on role
+  const canSeeContracts = auth.role === 'admin' || auth.role === 'contract_admin';
+  document.querySelectorAll('.contract-only').forEach(el => {
+    el.style.display = canSeeContracts ? '' : 'none';
+  });
+  document.querySelectorAll('.contract-only-mobile').forEach(el => {
+    el.style.display = canSeeContracts ? '' : 'none';
+  });
 }
 
 // ==================== Team Manage (Admin) ====================
@@ -554,6 +593,7 @@ async function showTeamManage() {
       <input id="tm_user" placeholder="用户名">
       <input id="tm_name" placeholder="显示名称">
       <input type="password" id="tm_pass" placeholder="密码">
+      <select id="tm_role"><option value="member">普通成员</option><option value="contract_admin">合同管理员</option></select>
     </div>
     <button class="btn btn-primary btn-sm" onclick="addTeamMember()">添加成员</button>
   </div>`;
@@ -561,10 +601,11 @@ async function showTeamManage() {
   html += `<table class="user-table">
     <tr><th>用户名</th><th>显示名</th><th>角色</th><th>创建时间</th><th>操作</th></tr>`;
   users.forEach(u => {
+    const roleLabel = u.role === 'admin' ? '管理员' : u.role === 'contract_admin' ? '合同管理员' : '成员';
     html += `<tr>
       <td>${escapeHtml(u.username)}</td>
       <td>${escapeHtml(u.displayName||'')}</td>
-      <td><span class="role-tag ${u.role}">${u.role==='admin'?'管理员':'成员'}</span></td>
+      <td><span class="role-tag ${u.role}">${roleLabel}</span></td>
       <td style="font-size:12px">${u.createdAt||'-'}</td>
       <td>
         <button class="btn btn-outline btn-xs" onclick="changeMemberPassword('${u.id}','${escapeHtml(u.username)}')">改密</button>
@@ -582,9 +623,10 @@ async function addTeamMember() {
   const username = document.getElementById('tm_user').value.trim();
   const displayName = document.getElementById('tm_name').value.trim();
   const password = document.getElementById('tm_pass').value.trim();
+  const role = document.getElementById('tm_role').value;
   if (!username || !password) { showToast('用户名和密码不能为空'); return; }
   try {
-    await apiPost('/api/users', { username, displayName, password });
+    await apiPost('/api/users', { username, displayName, password, role });
     closeModal(); showTeamManage(); showToast('成员已添加');
   } catch(e) { showToast(e.message); }
 }
@@ -607,17 +649,63 @@ async function changeMemberPassword(id, username) {
 }
 
 // ==================== Toast ====================
-function showToast(msg) {
+function showToast(msg, duration = 2000) {
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
-  clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 2000);
+  clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), duration);
+}
+
+// ==================== Batch Delete Helper ====================
+function getSelectedIds() {
+  return Array.from(document.querySelectorAll('.row-checkbox:checked')).map(cb => cb.dataset.id);
+}
+function toggleAllRows(masterCheckbox) {
+  document.querySelectorAll('.row-checkbox').forEach(cb => { cb.checked = masterCheckbox.checked; });
+  updateBatchDeleteBar();
+}
+function updateBatchDeleteBar() {
+  const count = document.querySelectorAll('.row-checkbox:checked').length;
+  document.querySelectorAll('.batch-delete-bar').forEach(bar => {
+    if (count > 0) {
+      bar.style.display = '';
+      bar.querySelector('.batch-count').textContent = count;
+    } else {
+      bar.style.display = 'none';
+    }
+  });
+}
+
+// Pagination state
+var interviewPage = 1, interviewPageSize = 10;
+var contractPage = 1, contractPageSize = 10;
+
+function renderPagination(total, currentPage, pageSize, prefix) {
+  const totalPages = Math.ceil(total / pageSize);
+  if (totalPages <= 1) return '';
+  let html = `<div class="pagination">
+    <span style="font-size:12px;color:var(--text2);margin-right:8px">共 ${total} 条</span>
+    <select onchange="window['${prefix}PageSize']=parseInt(this.value);window['${prefix}Page']=1;render()" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+      <option value="10" ${pageSize===10?'selected':''}>10条/页</option>
+      <option value="20" ${pageSize===20?'selected':''}>20条/页</option>
+      <option value="50" ${pageSize===50?'selected':''}>50条/页</option>
+    </select>`;
+  for (let i = 1; i <= totalPages; i++) {
+    html += `<button class="btn btn-outline btn-xs pagination-btn" style="min-width:28px" onclick="window['${prefix}Page']=${i};render()">${i}</button>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function paginate(arr, page, pageSize) {
+  const start = (page - 1) * pageSize;
+  return arr.slice(start, start + pageSize);
 }
 
 // ==================== Utils ====================
 function genId() { return 'id_' + Date.now() + '_' + Math.random().toString(36).substr(2,6); }
 function today() { return new Date().toISOString().split('T')[0]; }
 function daysUntil(d) { if(!d) return Infinity; return Math.ceil((new Date(d) - new Date(today())) / 86400000); }
-function escapeHtml(str) { if(!str) return ''; return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escapeHtml(str) { if(str===null||str===undefined) return ''; str=String(str); return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 // ==================== Tab Switching ====================
 let currentTab = 0;
@@ -634,7 +722,7 @@ document.getElementById('mobileTabs').addEventListener('click', e => {
 });
 
 // ==================== Today Overview ====================
-function getTodayItems(todos, interviews, hires, positions) {
+function getTodayItems(todos, interviews, hires, positions, contracts) {
   const now = today();
   const items = [];
   todos.filter(t => !t.completed && t.dueDate && t.dueDate < now).forEach(t => {
@@ -648,6 +736,15 @@ function getTodayItems(todos, interviews, hires, positions) {
   });
   interviews.filter(iv => iv.interviewDate < now && iv.result === '待定').forEach(iv => {
     items.push({ type: 'interview_followup', title: `[待跟进] ${iv.name} - ${iv.position}`, meta: `${iv.interviewType} 于 ${iv.interviewDate}`, data: iv, action: 'followup_interview' });
+  });
+  // Contract expiry reminders (7 days)
+  (contracts||[]).filter(c => {
+    if (!c.endDate || c.status === '已完成' || c.status === '已过期') return false;
+    const days = Math.ceil((new Date(c.endDate).setHours(0,0,0,0) - new Date(now).setHours(0,0,0,0)) / 86400000);
+    return days >= 0 && days <= 7;
+  }).forEach(c => {
+    const days = Math.ceil((new Date(c.endDate).setHours(0,0,0,0) - new Date(now).setHours(0,0,0,0)) / 86400000);
+    items.push({ type: 'contract_expiring', title: `📋 ${c.name} 合同${days===0?'今天':'即将'}到期`, meta: `截止 ${c.endDate} | ${c.contractType||''}`, data: c, action: 'view_contract' });
   });
   hires.forEach(h => {
     const allCheckins = h.periods ? h.periods.reduce((sum,p) => sum.concat(p.checkins||[]), []) : (h.checkins||[]);
@@ -837,11 +934,19 @@ async function renderBoard(positions) {
   if (positions.length===0) {
     html += `<div style="text-align:center;color:var(--text2);padding:20px">暂无岗位${canEdit?'，点击上方按钮新增':''}</div>`;
   } else {
+    if (canEdit) {
+      html += `<div class="batch-delete-bar" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;margin-bottom:8px">
+        <span style="color:var(--danger);font-weight:600">已选 <span class="batch-count">0</span> 个</span>
+        <button class="btn btn-danger btn-sm" style="margin-left:12px" onclick="batchDeletePositions()">批量删除</button>
+        <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="document.querySelectorAll('.row-checkbox').forEach(cb=>cb.checked=false);updateBatchDeleteBar()">取消</button>
+      </div>`;
+    }
     html += `<div style="overflow-x:auto"><table class="pos-table" id="posTable">
-      <tr><th>岗位</th><th>部门</th><th>需求</th><th>截止</th><th>简历</th><th>初面</th><th>复试</th><th>终面</th><th>Offer</th><th>入职</th>${canEdit?'<th>操作</th>':''}</tr>`;
+      <tr>${canEdit?'<th style="width:40px"><input type="checkbox" onchange="toggleAllRows(this)"></th>':''}<th>岗位</th><th>部门</th><th>需求</th><th>截止</th><th>简历</th><th>初面</th><th>复试</th><th>终面</th><th>Offer</th><th>入职</th>${canEdit?'<th>操作</th>':''}</tr>`;
     positions.forEach(p => {
       const overdue = p.deadline && p.deadline < today();
       html += `<tr data-pid="${p.id}">
+        ${canEdit?`<td><input type="checkbox" class="row-checkbox" data-id="${p.id}" onchange="updateBatchDeleteBar()"></td>`:''}
         <td><strong>${escapeHtml(p.position)}</strong>${overdue?' <span style="color:var(--danger);font-size:11px">逾期</span>':''}</td>
         <td>${escapeHtml(p.dept)}</td><td><input type="number" value="${p.headcount||1}" min="1" style="width:50px;text-align:center;padding:4px;border:1px solid transparent;border-radius:4px;font-size:13px;background:transparent" onchange="updatePositionHeadcount('${p.id}', parseInt(this.value)||1)" onfocus="this.style.borderColor='var(--primary)';this.style.background='#fff'" onblur="this.style.borderColor='transparent';this.style.background='transparent'" title="点击修改需求人数"></td>
         <td style="color:${overdue?'var(--danger)':'var(--text)'}">${p.deadline||'-'}</td>
@@ -988,6 +1093,9 @@ async function renderInterviews(interviews, positions) {
         <button class="btn btn-outline btn-sm" onclick="downloadInterviewTemplate()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>下载模板
         </button>
+        <button class="btn btn-outline btn-sm" onclick="exportInterviews()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>导出表格
+        </button>
         <button class="btn btn-primary btn-sm" onclick="showAddInterview()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>新增面试
         </button>
@@ -1022,9 +1130,13 @@ async function renderInterviews(interviews, positions) {
       tableEl.innerHTML = '<div style="text-align:center;color:var(--text2);padding:20px">暂无匹配记录</div>';
       return;
     }
-    tableEl.innerHTML = `<div style="overflow-x:auto"><table class="interview-table">
-      <tr><th>姓名</th><th>学历</th><th>性别</th><th>岗位</th><th>电话</th><th>渠道</th><th>初面</th><th>复面</th><th>面试官</th><th>结果</th>${isAdmin()?'<th>录入人</th>':''}<th>备注</th><th>操作</th></tr>
-      ${filtered.map(iv => {
+    tableEl.innerHTML = `<div class="batch-delete-bar" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;margin-bottom:8px">
+    <span style="color:var(--danger);font-weight:600">已选 <span class="batch-count">0</span> 条</span>
+    <button class="btn btn-danger btn-sm" style="margin-left:12px" onclick="batchDeleteInterviews()">批量删除</button>
+    <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="document.querySelectorAll('.row-checkbox').forEach(cb=>cb.checked=false);updateBatchDeleteBar()">取消</button>
+  </div><div style="overflow-x:auto"><table class="interview-table">
+      <tr><th style="width:40px"><input type="checkbox" onchange="toggleAllRows(this)"></th><th class="sticky-col">序号</th><th class="sticky-col2">姓名</th><th>学历</th><th>性别</th><th>岗位</th><th>电话</th><th>渠道</th><th>初面</th><th>复面</th><th>面试官</th><th>结果</th>${isAdmin()?'<th>录入人</th>':''}<th>备注</th><th>操作</th></tr>
+      ${(() => { const pageData = paginate([...filtered], interviewPage, interviewPageSize); return pageData.map((iv, idx) => {
         const canModify = isAdmin() || iv.createdBy === auth.userId;
         let tag = '';
         if (iv.result==='通过') tag='<span class="tag tag-pass">通过</span>';
@@ -1033,22 +1145,25 @@ async function renderInterviews(interviews, positions) {
         else tag='<span class="tag tag-wait">待面试</span>';
         const d1 = iv.firstInterviewDate||'-';
         const d2 = iv.secondInterviewDate||'-';
+        const seqNum = (interviewPage - 1) * interviewPageSize + idx + 1;
         return `<tr>
-          <td><strong>${escapeHtml(iv.name)}</strong></td>
-          <td style="font-size:12px">${escapeHtml(iv.education||'-')}</td>
-          <td style="font-size:12px">${escapeHtml(iv.gender||'-')}</td>
-          <td>${escapeHtml(iv.position)}</td>
-          <td style="font-size:13px">${escapeHtml(iv.phone)}</td>
-          <td style="font-size:12px">${escapeHtml(iv.source||'-')}</td>
-          <td style="font-size:13px">${d1}</td><td style="font-size:13px">${d2}</td>
-          <td>${escapeHtml(iv.interviewer||'-')}</td><td>${tag}</td>
-          ${isAdmin()?`<td style="font-size:11px;color:var(--text2)">${userMap[iv.createdBy]||'-'}</td>`:''}
+          <td style="white-space:nowrap"><input type="checkbox" class="row-checkbox" data-id="${iv.id}" onchange="updateBatchDeleteBar()"></td>
+          <td class="sticky-col" style="white-space:nowrap;background:inherit">${seqNum}</td>
+          <td class="sticky-col2" style="white-space:nowrap"><strong>${escapeHtml(iv.name)}</strong></td>
+          <td style="font-size:12px;white-space:nowrap">${escapeHtml(iv.education||'-')}</td>
+          <td style="font-size:12px;white-space:nowrap">${escapeHtml(iv.gender||'-')}</td>
+          <td style="white-space:nowrap">${escapeHtml(iv.position)}</td>
+          <td style="font-size:13px;white-space:nowrap">${escapeHtml(iv.phone)}</td>
+          <td style="font-size:12px;white-space:nowrap">${escapeHtml(iv.source||'-')}</td>
+          <td style="font-size:13px;white-space:nowrap">${d1}</td><td style="font-size:13px;white-space:nowrap">${d2}</td>
+          <td style="white-space:nowrap">${escapeHtml(iv.interviewer||'-')}</td><td style="white-space:nowrap">${tag}</td>
+          ${isAdmin()?`<td style="font-size:11px;color:var(--text2);white-space:nowrap">${userMap[iv.createdBy]||'-'}</td>`:''}
           <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${escapeHtml(iv.notes||'')}">${escapeHtml(iv.notes||'-')}</td>
           <td style="white-space:nowrap">
             ${canModify?`<button class="btn btn-outline btn-xs" onclick="editInterview('${iv.id}')">编辑</button><button class="btn btn-danger btn-xs" onclick="deleteInterview('${iv.id}')">删除</button>`:`<span style="font-size:11px;color:var(--text2)">只读</span>`}
           </td>
         </tr>`;
-      }).join('')}
+      }).join('') + renderPagination(filtered.length, interviewPage, interviewPageSize, 'interview'); })()}
     </table></div>`;
   }, 10);
   
@@ -1193,6 +1308,47 @@ async function batchImport() {
   } catch(e) { showToast(e.message); }
 }
 
+async function exportInterviews() {
+  try {
+    const interviews = await apiGet('/api/interviews');
+    if (interviews.length === 0) { showToast('暂无数据可导出'); return; }
+    const BOM = '\uFEFF';
+    const headers = '姓名,岗位,电话,学历,性别,邀约人,渠道来源,初面时间,复面时间,面试官,面试结果,拟入职时间,备注';
+    const rows = interviews.map(iv => [
+      iv.name, iv.position, iv.phone, iv.education||'', iv.gender||'', iv.inviter||'',
+      iv.source||'', iv.firstInterviewDate||'', iv.secondInterviewDate||'',
+      iv.interviewer||'', iv.result||'', iv.expectedOnboardDate||'', iv.notes||''
+    ].map(v => '"'+String(v).replace(/"/g,'""')+'"').join(','));
+    const csv = BOM + headers + '\n' + rows.join('\n');
+    downloadBlob(csv, '面试记录_' + today() + '.csv', 'text/csv;charset=utf-8');
+    showToast('已导出 ' + interviews.length + ' 条');
+  } catch(e) { showToast(e.message); }
+}
+
+async function exportContracts() {
+  try {
+    const contracts = await apiGet('/api/contracts');
+    if (contracts.length === 0) { showToast('暂无数据可导出'); return; }
+    const BOM = '\uFEFF';
+    const headers = '序号,员工姓名,部门,入职日期,签订日期,合同约期,到期日期,签订单位,备注';
+    const rows = contracts.map(c => [
+      c.seq||'', c.name, c.dept||'', c.entryDate||'', c.signDate||'',
+      c.duration||'', c.endDate||'', c.signUnit||'', c.notes||''
+    ].map(v => '"'+String(v).replace(/"/g,'""')+'"').join(','));
+    const csv = BOM + headers + '\n' + rows.join('\n');
+    downloadBlob(csv, '合同台账_' + today() + '.csv', 'text/csv;charset=utf-8');
+    showToast('已导出 ' + contracts.length + ' 条');
+  } catch(e) { showToast(e.message); }
+}
+
+function downloadBlob(content, filename, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
 function downloadInterviewTemplate() {
   // CSV template with BOM so Excel opens correctly with Chinese
   const BOM = '\uFEFF';
@@ -1240,10 +1396,10 @@ async function handleInterviewCSVUpload(event) {
   if (!confirm(`解析到 ${items.length} 条面试记录，确认导入？`)) { event.target.value = ''; return; }
   
   try {
-    const res = await apiPost('/api/interviews/batch', { items });
+    const res = await apiPost('/api/interviews/batch-upsert', { items });
     event.target.value = '';
     await render();
-    showToast(`导入完成：${res.count} 条记录`);
+    showToast(`导入完成：新增 ${res.added} 条，更新 ${res.updated} 条`);
   } catch(e) { showToast(e.message); event.target.value = ''; }
 }
 
@@ -1410,34 +1566,103 @@ async function deleteTodo(id) {
 function renderFollowUp(hires, templates) {
   let html = '';
   
-  // Templates
+  // Templates - grouped by category
+  const categories = ['销售', '顾问', '技术', '运营', '管理', '其他'];
+  const grouped = {};
+  templates.forEach(tpl => {
+    const cat = tpl.category || '未分类';
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(tpl);
+  });
+  // Sort templates by day/week number (第1天 < 第一天 < 第1周 < 第一周 < ...)
+  Object.keys(grouped).forEach(k => grouped[k].sort((a,b) => {
+    const getSort = (name) => {
+      const s = String(name);
+      // Match patterns: 第X天, 第X周, 第X月, 第一天, 第一周 etc.
+      let m = s.match(/第\s*(\d+|[一二三四五六七八九十]+)\s*天/);
+      if (m) { return { unit: 'day', num: chineseToNum(m[1]) }; }
+      m = s.match(/第\s*(\d+|[一二三四五六七八九十]+)\s*周/);
+      if (m) { return { unit: 'week', num: chineseToNum(m[1]) }; }
+      m = s.match(/第\s*(\d+|[一二三四五六七八九十]+)\s*月/);
+      if (m) { return { unit: 'month', num: chineseToNum(m[1]) }; }
+      m = s.match(/(\d+)\s*天/);
+      if (m) { return { unit: 'day', num: parseInt(m[1]) }; }
+      m = s.match(/(\d+)\s*周/);
+      if (m) { return { unit: 'week', num: parseInt(m[1]) }; }
+      return { unit: 'zzz', num: 99 }; // unrecognized → sort last
+    };
+    const chineseToNum = (ch) => {
+      const map = { '一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10 };
+      if (map[ch]) return map[ch];
+      if (ch === '十一') return 11;
+      if (ch === '十二') return 12;
+      return parseInt(ch) || 99;
+    };
+    const sa = getSort(a.name), sb = getSort(b.name);
+    if (sa.unit !== sb.unit) return sa.unit.localeCompare(sb.unit);
+    return sa.num - sb.num;
+  }));
+  
+  // Render category groups
+  const categoryColors = {
+    '销售': '#ef4444', '顾问': '#3b82f6', '技术': '#10b981',
+    '运营': '#f59e0b', '管理': '#8b5cf6', '其他': '#64748b', '未分类': '#94a3b8'
+  };
+  const categoryIcons = {
+    '销售': '💼', '顾问': '🎯', '技术': '💻',
+    '运营': '📊', '管理': '👔', '其他': '📁', '未分类': '❓'
+  };
+  
+  const renderTemplateCard = (tpl) => `<div class="template-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div style="flex:1;min-width:0">
+        <h4>${escapeHtml(tpl.name)}</h4>
+        <div class="q-list">${tpl.questions.length}个问题：${tpl.questions.map((q,i)=>`${i+1}. ${escapeHtml(q)}`).join(' | ')}</div>
+      </div>
+      <div>
+        <button class="btn btn-outline btn-xs" onclick="editTemplate('${tpl.id}')">编辑</button>
+        <button class="btn btn-outline btn-xs" onclick="cloneTemplate('${tpl.id}')">复制</button>
+        <button class="btn btn-danger btn-xs" onclick="deleteTemplate('${tpl.id}')">删除</button>
+      </div>
+    </div>
+  </div>`;
+  
+  // Build categories HTML (in defined order, then "未分类" last)
+  let categoryHtml = '';
+  const allCats = [...categories.filter(c => grouped[c]), ...(grouped['未分类'] ? ['未分类'] : [])];
+  
+  if (templates.length === 0) {
+    categoryHtml = `<div style="text-align:center;color:var(--text2);padding:12px">暂无模板，点击右上角新建</div>`;
+  } else {
+    allCats.forEach((cat, idx) => {
+      const tpls = grouped[cat] || [];
+      const color = categoryColors[cat] || '#64748b';
+      const icon = categoryIcons[cat] || '📁';
+      const open = ''; // all categories collapsed by default
+      categoryHtml += `<div class="category-group${open}" data-cat="${cat}">
+        <div class="category-header" onclick="toggleCategory(this)">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="category-toggle">▶</span>
+            <span style="font-size:16px">${icon}</span>
+            <span style="font-weight:600;color:${color}">${escapeHtml(cat)}</span>
+            <span style="background:${color}20;color:${color};font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600">${tpls.length}</span>
+          </div>
+        </div>
+        <div class="category-body">
+          ${tpls.map(renderTemplateCard).join('')}
+        </div>
+      </div>`;
+    });
+  }
+  
   html += `<div class="card">
     <div class="card-header"><h2>访谈模板</h2>
       <button class="btn btn-primary btn-sm" onclick="showAddTemplate()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>新建模板
       </button>
-    </div>`;
-  
-  if (templates.length===0) {
-    html += `<div style="text-align:center;color:var(--text2);padding:12px">暂无模板，点击上方新建</div>`;
-  } else {
-    templates.forEach(tpl => {
-      html += `<div class="template-card">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-          <div style="flex:1;min-width:0">
-            <h4>${escapeHtml(tpl.name)}</h4>
-            <div class="q-list">${tpl.questions.length}个问题：${tpl.questions.map((q,i)=>`${i+1}. ${escapeHtml(q)}`).join(' | ')}</div>
-          </div>
-          <div>
-            <button class="btn btn-outline btn-xs" onclick="editTemplate('${tpl.id}')">编辑</button>
-            <button class="btn btn-outline btn-xs" onclick="cloneTemplate('${tpl.id}')">复制</button>
-            <button class="btn btn-danger btn-xs" onclick="deleteTemplate('${tpl.id}')">删除</button>
-          </div>
-        </div>
-      </div>`;
-    });
-  }
-  html += `</div>`;
+    </div>
+    ${categoryHtml}
+  </div>`;
   
   // Hires with periods
   html += `<div class="card">
@@ -1473,6 +1698,9 @@ function renderFollowUp(hires, templates) {
             ${canModify?`<button class="btn btn-outline btn-xs" onclick="editHire('${h.id}')">编辑</button>`:''}
             ${canModify?`<button class="btn btn-success btn-xs" onclick="showAddPeriod('${h.id}')">+周期</button>`:''}
             ${canModify?`<button class="btn btn-danger btn-xs" onclick="deleteHire('${h.id}')">删除</button>`:''}
+            <button class="btn btn-outline btn-xs" onclick="exportHire('${h.id}')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>导出
+            </button>
           </div>
         </div>
         ${periods.length>0 ? periods.map((p,pi) => {
@@ -1583,11 +1811,150 @@ async function deletePeriod(hireId, periodId) {
   } catch(e) { showToast(e.message); }
 }
 
+// Checkin management
+async function addCheckin(hireId, periodId) {
+  try {
+    const [hires, templates] = await Promise.all([
+      apiGet('/api/hires'), apiGet('/api/templates')
+    ]);
+    const h = hires.find(x => x.id === hireId);
+    if (!h) { showToast('未找到该新人'); return; }
+    const period = (h.periods || []).find(p => p.id === periodId);
+    if (!period) { showToast('未找到该周期'); return; }
+    const tpl = templates.find(t => t.id === period.templateId);
+    const questions = period.questions && period.questions.length > 0 ? period.questions : (tpl ? tpl.questions : []);
+    const todayStr = today();
+
+    let qFields = '';
+    questions.forEach((q, i) => {
+      qFields += `<div style="margin-bottom:8px">
+        <label style="color:var(--danger);font-size:13px">Q${i+1}: ${escapeHtml(q)}</label>
+        <textarea id="ca_${i}" rows="2" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:14px;font-family:inherit;resize:vertical" placeholder="请输入回答..."></textarea>
+      </div>`;
+    });
+
+    showModal(`
+      <h3>添加随访记录 - ${escapeHtml(period.name)}</h3>
+      <div style="margin-bottom:12px"><label>随访日期</label><input id="ca_date" type="date" value="${todayStr}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:14px"></div>
+      ${qFields || '<div style="color:var(--text2);font-size:12px;margin-bottom:8px">该周期暂无问题，请先点击"编辑"添加问题</div>'}
+      <div style="margin-bottom:8px"><label>反馈/建议</label><input id="ca_feedback" placeholder="可选" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:14px"></div>
+      <div style="margin-bottom:8px"><label>备注</label><input id="ca_notes" placeholder="可选" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:14px"></div>
+      <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="saveCheckin('${hireId}','${periodId}',${questions.length})">保存</button></div>
+    `);
+  } catch(e) { showToast('加载失败: ' + e.message); }
+}
+
+async function saveCheckin(hireId, periodId, qCount) {
+  const date = document.getElementById('ca_date').value;
+  if (!date) { showToast('请选择随访日期'); return; }
+  const answers = {};
+  for (let i = 0; i < qCount; i++) {
+    const el = document.getElementById('ca_' + i);
+    if (el) { const val = el.value.trim(); if (val) answers[String(i)] = val; }
+  }
+  const feedback = document.getElementById('ca_feedback').value.trim();
+  const notes = document.getElementById('ca_notes').value.trim();
+  try {
+    await apiPost('/api/hires/' + hireId + '/periods/' + periodId + '/checkins', {
+      date, answers, feedback, notes
+    });
+    closeModal(); await render(); showToast('随访记录已添加');
+  } catch(e) { showToast(e.message); }
+}
+
+async function batchImportCheckins(hireId, periodId) {
+  try {
+    const [hires, templates] = await Promise.all([
+      apiGet('/api/hires'), apiGet('/api/templates')
+    ]);
+    const h = hires.find(x => x.id === hireId);
+    if (!h) { showToast('未找到该新人'); return; }
+    const period = (h.periods || []).find(p => p.id === periodId);
+    if (!period) { showToast('未找到该周期'); return; }
+    const tpl = templates.find(t => t.id === period.templateId);
+    const questions = period.questions && period.questions.length > 0 ? period.questions : (tpl ? tpl.questions : []);
+    if (questions.length === 0) { showToast('该周期暂无问题，请先编辑添加问题'); return; }
+    const qPreview = questions.map((q,i) => 'Q'+(i+1)+': '+q).join(' | ');
+    showModal(`
+      <h3>批量导入随访 - ${escapeHtml(period.name)}</h3>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:8px">每行一条，用 | 或 Tab 分隔：<br><code>日期 | 回答1 | 回答2 | ...</code><br>当前问题：${escapeHtml(qPreview)}</p>
+      <textarea id="batch_ck_text" rows="8" placeholder="2026-08-03 | 整体适应了 | 团队氛围好 | 工作上手了&#10;2026-08-10 | 很好 | 没问题 | 熟练了" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;min-height:140px;font-family:monospace"></textarea>
+      <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="doBatchImportCheckins('${hireId}','${periodId}',${questions.length})">批量导入</button></div>
+    `);
+  } catch(e) { showToast('加载失败'); }
+}
+
+async function doBatchImportCheckins(hireId, periodId, qCount) {
+  const text = document.getElementById('batch_ck_text').value.trim();
+  if (!text) { showToast('请粘贴内容'); return; }
+  const lines = text.split('\n').filter(l => l.trim());
+  let count = 0, errors = 0;
+  for (const line of lines) {
+    let parts;
+    if (line.includes('|')) parts = line.split('|').map(s => s.trim());
+    else if (line.includes('\t')) parts = line.split('\t').map(s => s.trim());
+    else continue;
+    if (!parts[0]) continue;
+    const answers = {};
+    for (let i = 0; i < qCount; i++) {
+      if (parts[i+1]) answers[String(i)] = parts[i+1];
+    }
+    try {
+      await apiPost('/api/hires/' + hireId + '/periods/' + periodId + '/checkins', {
+        date: parts[0], answers: answers, feedback: '', notes: ''
+      });
+      count++;
+    } catch(e) { errors++; }
+  }
+  closeModal(); await render(); showToast('成功导入 ' + count + ' 条' + (errors > 0 ? '，失败 ' + errors + ' 条' : ''));
+}
+
+// Auto-inject "批量导入" button next to "+随访"
+const _origRender2 = window.render;
+window.render = async function() {
+  if (_origRender2) await _origRender2();
+  setTimeout(function() {
+    document.querySelectorAll('.period-card').forEach(function(card) {
+      var addBtn = null;
+      var btns = card.querySelectorAll('.period-card-header button');
+      for (var j = 0; j < btns.length; j++) {
+        if (btns[j].textContent && btns[j].textContent.indexOf('+随访') >= 0) { addBtn = btns[j]; break; }
+      }
+      if (!addBtn) return;
+      for (var k = 0; k < btns.length; k++) {
+        if (btns[k].textContent && btns[k].textContent.indexOf('批量导入') >= 0) return;
+      }
+      var onclickAttr = addBtn.getAttribute('onclick') || '';
+      var m = onclickAttr.match(/addCheckin\('([^']+)','([^']+)'\)/);
+      if (!m) return;
+      var batchBtn = document.createElement('button');
+      batchBtn.className = 'btn btn-outline btn-xs';
+      batchBtn.textContent = '批量导入';
+      batchBtn.onclick = function(e) {
+        e.stopPropagation();
+        batchImportCheckins(m[1], m[2]);
+      };
+      addBtn.parentNode.insertBefore(batchBtn, addBtn.nextSibling);
+    });
+  }, 50);
+};
+
 // Template functions (unchanged)
 function showAddTemplate(editId) {
   showModal(`
     <h3>${editId?'编辑':'新建'}访谈模板</h3>
-    <div style="margin-bottom:12px"><label>模板名称</label><input id="f_tplname" value=""></div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <div style="flex:1"><label>模板名称</label><input id="f_tplname" value=""></div>
+      <div style="width:140px"><label>岗位类别</label><select id="f_tplcat">
+        <option value="销售">销售</option>
+        <option value="顾问">顾问</option>
+        <option value="技术">技术</option>
+        <option value="运营">运营</option>
+        <option value="管理">管理</option>
+        <option value="其他">其他</option>
+        <option value="未分类">未分类</option>
+      </select></div>
+    </div>
     <label>访谈问题</label>
     <div class="questions-editor" id="qEditor"><div class="question-row"><input placeholder="问题 1"><button class="btn btn-danger btn-xs btn-remove" onclick="this.parentElement.remove()">删除</button></div></div>
     <div style="display:flex;gap:8px;margin-top:8px">
@@ -1603,11 +1970,19 @@ function showAddTemplate(editId) {
         const found = templates.find(x=>x.id===editId);
         if (found) {
           document.getElementById('f_tplname').value = found.name||'';
+          document.getElementById('f_tplcat').value = found.category || '未分类';
           document.getElementById('qEditor').innerHTML = found.questions.map((q,i)=>`<div class="question-row"><input value="${escapeHtml(q)}" placeholder="问题 ${i+1}"><button class="btn btn-danger btn-xs btn-remove" onclick="this.parentElement.remove()">删除</button></div>`).join('');
         }
       } catch(e) {}
     })();
   }
+}
+
+function toggleCategory(el) {
+  const group = el.parentElement;
+  group.classList.toggle('open');
+  const toggle = el.querySelector('.category-toggle');
+  if (toggle) toggle.textContent = group.classList.contains('open') ? '▼' : '▶';
 }
 
 function addQuestionRow() {
@@ -1645,12 +2020,13 @@ function batchImportQuestions() {
 async function saveTemplate(editId) {
   const name = document.getElementById('f_tplname').value.trim();
   if (!name) { showToast('请输入模板名称'); return; }
+  const category = document.getElementById('f_tplcat').value || '未分类';
   const questions = [];
   document.querySelectorAll('#qEditor .question-row input').forEach(inp=>{const q=inp.value.trim();if(q)questions.push(q);});
   if (questions.length===0) { showToast('请至少添加一个问题'); return; }
   try {
-    if (editId) { await apiPut('/api/templates/'+editId, { name, questions }); }
-    else { await apiPost('/api/templates', { name, questions }); }
+    if (editId) { await apiPut('/api/templates/'+editId, { name, category, questions }); }
+    else { await apiPost('/api/templates', { name, category, questions }); }
     closeModal(); await render(); showToast(editId?'已更新':'已创建');
   } catch(e) { showToast(e.message); }
 }
@@ -1707,72 +2083,118 @@ async function deleteHire(id) {
   catch(e) { showToast(e.message); }
 }
 
-async function addCheckin(hireId, periodId) {
+async function exportHire(hireId) {
   try {
-    const hires = await apiGet('/api/hires');
-    const h = hires.find(x=>x.id===hireId);
-    if (!h) return;
-    const period = (h.periods||[]).find(p=>p.id===periodId);
-    if (!period) return;
-    const templates = await apiGet('/api/templates');
-    const tpl = templates.find(t=>t.id===period.templateId);
-    const questions = period.questions && period.questions.length>0 ? period.questions : (tpl ? tpl.questions : []);
-    
-    let qHtml = questions.length>0 ? questions.map((q,i)=>`<div style="margin-bottom:10px"><label>Q${i+1}: ${escapeHtml(q)}</label><input id="fc_q${i}" placeholder="回答..."></div>`).join('')
-      : '<div style="color:var(--text2);font-size:13px;margin-bottom:8px">该周期无问题设置，可自由记录</div>';
-    
-    const batchBtn = questions.length > 0 ? '<button class="btn btn-success btn-sm" onclick="batchImportAnswers(' + questions.length + ')" style="margin-bottom:12px">📋 批量导入回答</button>' : '';
-    
-    showModal(`
-      <h3>随访 - ${escapeHtml(h.name)} · ${escapeHtml(period.name)}</h3>
-      <div style="margin-bottom:12px"><label>日期</label><input type="date" id="fc_date" value="${today()}"></div>
-      ${batchBtn}
-      ${qHtml}
-      <div><label>反馈/待办</label><input id="fc_feedback" placeholder="需要跟进的事项..."></div>
-      <div style="margin-top:8px"><label>备注</label><textarea id="fc_notes" placeholder="其他补充..."></textarea></div>
-      <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="saveCheckin('${hireId}','${periodId}')">保存</button></div>
-    `);
-  } catch(e) { showToast('加载失败'); }
+    const [hires, templates] = await Promise.all([
+      apiGet('/api/hires'), apiGet('/api/templates')
+    ]);
+    const h = hires.find(x => x.id === hireId);
+    if (!h) { showToast('未找到该新人'); return; }
+
+    const periods = h.periods || [];
+    if (periods.length === 0) { showToast('暂无随访数据可导出'); return; }
+
+    let maxQ = 0;
+    periods.forEach(p => {
+      const tpl = templates.find(t => t.id === p.templateId);
+      const qs = (p.questions && p.questions.length > 0) ? p.questions : (tpl ? tpl.questions : []);
+      if (qs.length > maxQ) maxQ = qs.length;
+    });
+
+    const DATA_COLS = 2 + 2 * maxQ; // 随访周期1 + 随访日期1 + maxQ对QA
+    const TOTAL_COLS = Math.max(8, DATA_COLS); // 信息行至少需要8列
+
+    const fontStyle = 'font-family:微软雅黑;font-size:11pt';
+    const labelStyle = fontStyle + ';border:1px solid #999;padding:4px 8px;background:#D9E2F3;color:#1F3864;font-weight:bold;vertical-align:middle';
+    const valueStyle = fontStyle + ';border:1px solid #999;padding:4px 8px;background:#fff;vertical-align:middle';
+    const qStyle = fontStyle + ';border:1px solid #999;padding:4px 8px;color:red;vertical-align:top';
+    const aStyle = fontStyle + ';border:1px solid #999;padding:4px 8px;background:#fff;vertical-align:top';
+    const periodStyle = fontStyle + ';border:1px solid #999;padding:4px 8px;background:#fff;text-align:center;font-weight:bold;vertical-align:middle';
+    const dateStyle = fontStyle + ';border:1px solid #999;padding:4px 8px;background:#fff;text-align:center;vertical-align:middle';
+
+    // 分配信息行8个字段的colspan，总和等于 TOTAL_COLS
+    let infoSpans = [];
+    if (TOTAL_COLS === 8) {
+      infoSpans = [1, 1, 1, 1, 1, 1, 1, 1];
+    } else {
+      const remaining = TOTAL_COLS - 4; // 4个label各占1
+      const base = Math.floor(remaining / 4);
+      let extra = remaining % 4;
+      for (let i = 0; i < 8; i++) {
+        if (i % 2 === 0) {
+          infoSpans.push(1); // label
+        } else {
+          let span = base + (extra > 0 ? 1 : 0);
+          extra--;
+          infoSpans.push(span);
+        }
+      }
+    }
+
+    let html2 = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>随访记录</x:Name></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head><body>';
+    html2 += '<table border="1" cellpadding="0" cellspacing="0" style="border-collapse:collapse">';
+
+    // 信息行
+    html2 += '<tr>';
+    html2 += '<td colspan="' + infoSpans[0] + '" style="' + labelStyle + '">员工姓名</td>';
+    html2 += '<td colspan="' + infoSpans[1] + '" style="' + valueStyle + '">' + escapeHtml(h.name) + '</td>';
+    html2 += '<td colspan="' + infoSpans[2] + '" style="' + labelStyle + '">部门</td>';
+    html2 += '<td colspan="' + infoSpans[3] + '" style="' + valueStyle + '">' + escapeHtml(h.dept || '-') + '</td>';
+    html2 += '<td colspan="' + infoSpans[4] + '" style="' + labelStyle + '">岗位</td>';
+    html2 += '<td colspan="' + infoSpans[5] + '" style="' + valueStyle + '">' + escapeHtml(h.position || '-') + '</td>';
+    html2 += '<td colspan="' + infoSpans[6] + '" style="' + labelStyle + '">入职日期</td>';
+    html2 += '<td colspan="' + infoSpans[7] + '" style="' + valueStyle + '">' + (h.entryDate || '-') + '</td>';
+    html2 += '</tr>';
+
+    periods.forEach(p => {
+      const periodName = p.name || '';
+      const tpl = templates.find(t => t.id === p.templateId);
+      const questions = (p.questions && p.questions.length > 0) ? p.questions : (tpl ? tpl.questions : []);
+      const checkins = (p.checkins || []).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+      // 表头行：随访周期 | 随访日期 | 随访问题与回答(跨2*maxQ列)
+      html2 += '<tr>';
+      html2 += '<td style="' + labelStyle + '">随访周期</td>';
+      html2 += '<td style="' + labelStyle + '">随访日期</td>';
+      html2 += '<td colspan="' + (2 * maxQ) + '" style="' + labelStyle + '">随访问题与回答</td>';
+      html2 += '</tr>';
+
+      if (checkins.length === 0) {
+        // 无打卡记录，但显示问题和空回答
+        html2 += '<tr>';
+        html2 += '<td style="' + periodStyle + '">' + escapeHtml(periodName) + '</td>';
+        html2 += '<td style="' + dateStyle + '"></td>';
+        for (let i = 0; i < maxQ; i++) {
+          html2 += '<td style="' + qStyle + '">' + (i < questions.length ? escapeHtml(questions[i]) : '') + '</td>';
+          html2 += '<td style="' + aStyle + '"></td>';
+        }
+        html2 += '</tr>';
+      } else {
+        checkins.forEach((c, ci) => {
+          html2 += '<tr>';
+          if (ci === 0 && checkins.length > 1) {
+            html2 += '<td rowspan="' + checkins.length + '" style="' + periodStyle + '">' + escapeHtml(periodName) + '</td>';
+          } else if (ci === 0) {
+            html2 += '<td style="' + periodStyle + '">' + escapeHtml(periodName) + '</td>';
+          }
+          html2 += '<td style="' + dateStyle + '">' + (c.date || '') + '</td>';
+          for (let i = 0; i < maxQ; i++) {
+            html2 += '<td style="' + qStyle + '">' + (i < questions.length ? escapeHtml(questions[i]) : '') + '</td>';
+            const ans = c.answers && c.answers[String(i)] ? c.answers[String(i)] : '';
+            html2 += '<td style="' + aStyle + '">' + escapeHtml(ans) + '</td>';
+          }
+          html2 += '</tr>';
+        });
+      }
+    });
+
+    html2 += '</table></body></html>';
+
+    downloadBlob(html2, h.name + '_随访记录_' + today() + '.xls', 'application/vnd.ms-excel;charset=utf-8');
+    showToast('已导出 ' + h.name);
+  } catch (e) { showToast(e.message); }
 }
 
-async function saveCheckin(hireId, periodId) {
-  const hires = await apiGet('/api/hires');
-  const h = hires.find(x=>x.id===hireId);
-  if (!h) return;
-  const period = (h.periods||[]).find(p=>p.id===periodId);
-  if (!period) return;
-  const templates = await apiGet('/api/templates');
-  const tpl = templates.find(t=>t.id===period.templateId);
-  const questions = period.questions && period.questions.length>0 ? period.questions : (tpl ? tpl.questions : []);
-  const answers = {};
-  questions.forEach((_,i)=>{const inp=document.getElementById('fc_q'+i);answers[String(i)]=inp?inp.value.trim():'';});
-  const checkin = { date: document.getElementById('fc_date').value, answers, feedback: document.getElementById('fc_feedback').value.trim(), notes: document.getElementById('fc_notes').value.trim() };
-  try {
-    await apiPost('/api/hires/'+hireId+'/periods/'+periodId+'/checkins', checkin);
-    closeModal(); await render(); showToast('随访已保存');
-  } catch(e) { showToast(e.message); }
-}
-
-function batchImportAnswers(questionCount) {
-  const text = prompt(`请粘贴 ${questionCount} 个问题的回答（每行一个回答，按 Q1~Q${questionCount} 顺序对应，空行跳过）：`);
-  if (!text || !text.trim()) return;
-  const lines = text.trim().split(/\r?\n/);
-  let idx = 0;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue; // skip blank lines
-    if (idx >= questionCount) break;
-    const inp = document.getElementById('fc_q' + idx);
-    if (inp) inp.value = trimmed;
-    idx++;
-  }
-  showToast(`已填充 ${idx} 个回答`);
-}
-
-// ==================== Module 4: Progress Table ====================
-let progressEditId = null;
-
-// Track progress month/year
 let progressYear = 2026;
 let progressMonth = 8;
 
@@ -1960,6 +2382,23 @@ async function readCSVFile(file) {
   return text.replace(/^\uFEFF/, '');
 }
 
+// Convert Excel serial date to ISO string (handles both Excel epoch systems)
+function excelDateToISO(value) {
+  if (value === '' || value === null || value === undefined) return value;
+  // Already ISO-like string?
+  if (typeof value === 'string' && /^\d{4}-\d{1,2}-\d{1,2}/.test(value.trim())) return value.trim();
+  // Numeric Excel serial?
+  const num = typeof value === 'number' ? value : parseFloat(value);
+  if (!isNaN(num) && num > 1000 && num < 100000) {
+    // Excel epoch: 1900-01-01. Adjust for 1900 leap year bug (Excel wrongly counts Feb 29 1900)
+    const days = num - 25569; // days from 1970-01-01
+    const ms = days * 86400000;
+    const d = new Date(ms);
+    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+  }
+  return value;
+}
+
 // Universal spreadsheet parser: handles CSV (GBK/UTF-8) and Excel (.xlsx/.xls)
 async function parseUploadedSpreadsheet(file) {
   const name = file.name.toLowerCase();
@@ -1968,17 +2407,29 @@ async function parseUploadedSpreadsheet(file) {
     const text = await readCSVFile(file);
     return parseCSV(text);
   }
-  // Excel (.xlsx / .xls) via SheetJS
+  // Excel (.xlsx / .xls) via SheetJS — read with date parsing
   const buf = await file.arrayBuffer();
-  const workbook = XLSX.read(buf, { type: 'array' });
+  const workbook = XLSX.read(buf, { type: 'array', cellDates: true });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', blankrows: false });
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', blankrows: false, raw: false });
   if (rows.length < 2) return [];
   const headers = rows[0].map(h => String(h).trim());
   const result = [];
   for (let i = 1; i < rows.length; i++) {
     const obj = {};
-    headers.forEach((h, idx) => { obj[h] = String(rows[i][idx] || '').trim(); });
+    headers.forEach((h, idx) => {
+      let v = rows[i][idx];
+      // Excel with cellDates:true returns Date objects; convert to ISO
+      if (v instanceof Date && !isNaN(v.getTime())) {
+        v = v.toISOString().split('T')[0];
+      } else if (typeof v === 'number') {
+        // Numeric Excel serial date
+        v = excelDateToISO(v);
+      } else {
+        v = String(v || '').trim();
+      }
+      obj[h] = v || '';
+    });
     if (Object.values(obj).some(v => v !== '')) result.push(obj);
   }
   return result;
@@ -2062,6 +2513,279 @@ async function handlePositionUpload(event) {
   } catch(e) { showToast(e.message); event.target.value = ''; }
 }
 
+// ==================== Module 6: Contracts ====================
+async function renderContracts(contracts) {
+  contracts = contracts || [];
+  const todayStr = today();
+
+  let html = `<div class="card">
+    <div class="card-header"><h2>劳动合同台账</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('contractUpload').click()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>上传表格
+        </button>
+        <input type="file" id="contractUpload" accept=".csv,.txt,.xlsx,.xls" style="display:none" onchange="handleContractUpload(event)">
+        <button class="btn btn-outline btn-sm" onclick="downloadContractTemplate()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>下载模板
+        </button>
+        <button class="btn btn-outline btn-sm" onclick="exportContracts()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>导出表格
+        </button>
+        <button class="btn btn-primary btn-sm" onclick="showAddContract()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>新增合同
+        </button>
+      </div>
+    </div>`;
+
+  // Expiring soon warning (15 days + expired)
+  const expiringSoon = contracts.filter(c => {
+    if (!c.endDate) return false;
+    const end = new Date(c.endDate); end.setHours(0,0,0,0);
+    const todayDate = new Date(todayStr); todayDate.setHours(0,0,0,0);
+    const days = Math.ceil((end - todayDate) / 86400000);
+    return days <= 15;
+  });
+  const expiredCount = expiringSoon.filter(c => {
+    const end = new Date(c.endDate); end.setHours(0,0,0,0);
+    const todayDate = new Date(todayStr); todayDate.setHours(0,0,0,0);
+    return Math.ceil((end - todayDate) / 86400000) < 0;
+  }).length;
+  const shortCount = expiringSoon.length - expiredCount;
+
+  if (expiringSoon.length > 0) {
+    html += `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px;margin-bottom:12px">
+      <div style="font-weight:600;color:var(--danger);font-size:14px;margin-bottom:4px">⚠️ ${expiredCount > 0 ? expiredCount + ' 份已超期，' : ''}${shortCount} 份合同15天内到期</div>
+      ${expiringSoon.map(c => {
+        const end = new Date(c.endDate); end.setHours(0,0,0,0);
+        const todayDate = new Date(todayStr); todayDate.setHours(0,0,0,0);
+        const days = Math.ceil((end - todayDate) / 86400000);
+        return `<span style="display:inline-block;background:${days<0?'#fee2e2':'#fef3c7'};color:${days<0?'var(--danger)':'#92400e'};padding:2px 8px;border-radius:4px;margin:2px;font-size:12px">${escapeHtml(c.name)} ${c.endDate}${days<0?' (超期)':' ('+days+'天)'}</span>`;
+      }).join('')}
+    </div>`;
+  }
+
+  if (contracts.length === 0) {
+    html += `<div style="text-align:center;color:var(--text2);padding:20px">暂无合同记录，点击上方上传或新增</div></div>`;
+    document.getElementById('moduleContent').innerHTML = html;
+    return;
+  }
+
+  // Sort by days until expiry (ascending): expired → soonest expiry first
+  const todayMs = new Date(todayStr).setHours(0,0,0,0);
+  const parseDateMs = (d) => {
+    if (!d) return Infinity;
+    const s = String(d).trim();
+    let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) return new Date(parseInt(m[1]), parseInt(m[2])-1, parseInt(m[3])).setHours(0,0,0,0);
+    m = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+    if (m) return new Date(parseInt(m[1]), parseInt(m[2])-1, parseInt(m[3])).setHours(0,0,0,0);
+    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+    if (m) { let y = parseInt(m[3]); if (y < 100) y += 2000; return new Date(y, parseInt(m[1])-1, parseInt(m[2])).setHours(0,0,0,0); }
+    return new Date(s).setHours(0,0,0,0) || Infinity;
+  };
+  contracts.sort((a,b) => {
+    const da = parseDateMs(a.endDate) - todayMs;
+    const db = parseDateMs(b.endDate) - todayMs;
+    return da - db;
+  });
+  contracts.forEach((c, i) => { c.seq = i + 1; });
+
+  html += `<div class="batch-delete-bar" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;margin-bottom:8px">
+    <span style="color:var(--danger);font-weight:600">已选 <span class="batch-count">0</span> 项</span>
+    <button class="btn btn-danger btn-sm" style="margin-left:12px" onclick="batchDeleteContracts()">批量删除</button>
+    <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="document.querySelectorAll('.row-checkbox').forEach(cb=>cb.checked=false);updateBatchDeleteBar()">取消</button>
+  </div>`;
+
+  html += `<div style="overflow-x:auto"><table class="pos-table">
+    <tr><th style="width:40px"><input type="checkbox" onchange="toggleAllRows(this)"></th><th>序号</th><th>员工姓名</th><th>部门</th><th>入职日期</th><th>签订日期</th><th>合同约期</th><th>到期日期</th><th>倒计时</th><th>签订单位</th><th>备注</th><th>操作</th></tr>`;
+
+  const allContracts = [...contracts];
+  const pagedContracts = paginate(allContracts, contractPage, contractPageSize);
+  pagedContracts.forEach(c => {
+    const days = c.endDate ? Math.ceil((new Date(c.endDate).setHours(0,0,0,0) - new Date(todayStr).setHours(0,0,0,0)) / 86400000) : 999;
+    let countdown = '-';
+    let rowClass = '';
+    if (days < 0) { countdown = `<span style="color:var(--danger);font-weight:600">已过期${Math.abs(days)}天</span>`; rowClass = 'style="background:#fff5f5"'; }
+    else if (days === 0) { countdown = `<span style="color:var(--danger);font-weight:600">今天到期</span>`; rowClass = 'style="background:#fff5f5"'; }
+    else if (days <= 15) { countdown = `<span style="color:var(--danger);font-weight:600">${days}天</span>`; rowClass = 'style="background:#fffbeb"'; }
+    else if (days <= 30) { countdown = `<span style="color:var(--warning);font-weight:500">${days}天</span>`; }
+    else countdown = `${days}天`;
+
+    const fmtDate = (d) => {
+      if (!d) return '-';
+      const s = String(d).trim();
+      let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+      if (m) return parseInt(m[1]) + '/' + parseInt(m[2]) + '/' + parseInt(m[3]);
+      m = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+      if (m) return parseInt(m[1]) + '/' + parseInt(m[2]) + '/' + parseInt(m[3]);
+      m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+      if (m) {
+        let y = parseInt(m[3]);
+        if (y < 100) y += 2000;
+        return y + '/' + parseInt(m[1]) + '/' + parseInt(m[2]);
+      }
+      return s;
+    };
+
+    html += `<tr ${rowClass}>
+      <td><input type="checkbox" class="row-checkbox" data-id="${c.id}" onchange="updateBatchDeleteBar()"></td>
+      <td>${c.seq}</td>
+      <td style="white-space:nowrap"><strong>${escapeHtml(c.name)}</strong></td>
+      <td style="white-space:nowrap">${escapeHtml(c.dept||'-')}</td>
+      <td style="white-space:nowrap">${fmtDate(c.entryDate)}</td>
+      <td style="white-space:nowrap">${fmtDate(c.signDate)}</td>
+      <td style="white-space:nowrap">${escapeHtml(String(c.duration||'-'))}</td>
+      <td style="white-space:nowrap">${c.endDate||'-'}</td>
+      <td style="white-space:nowrap">${countdown}</td>
+      <td style="max-width:120px;font-size:12px;white-space:nowrap">${escapeHtml(c.signUnit||'-')}</td>
+      <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${escapeHtml(c.notes||'')}">${escapeHtml(c.notes||'-')}</td>
+      <td style="white-space:nowrap"><button class="btn btn-outline btn-xs" onclick="editContract('${c.id}')">编辑</button><button class="btn btn-danger btn-xs" onclick="deleteContract('${c.id}')">删除</button></td>
+    </tr>`;
+  });
+
+  html += `</table>`;
+  html += renderPagination(allContracts.length, contractPage, contractPageSize, 'contract');
+  html += `</div></div>`;
+  document.getElementById('moduleContent').innerHTML = html;
+}
+
+function showAddContract(editId) {
+  showModal(`
+    <h3>${editId?'编辑':'新增'}合同</h3>
+    <div class="form-row"><div><label>员工姓名 *</label><input id="f_ctname" value=""></div><div><label>部门</label><input id="f_ctdept" placeholder="如：技术部"></div></div>
+    <div class="form-row"><div><label>入职日期</label><input type="date" id="f_ctentry"></div><div><label>签订日期</label><input type="date" id="f_ctsign"></div></div>
+    <div class="form-row"><div><label>合同约期（年）</label><input type="number" id="f_ctdur" min="0" step="1" placeholder="如：3"></div><div><label>到期日期</label><input type="date" id="f_ctend"><small style="display:block;color:var(--text2);font-size:11px;margin-top:2px">留空则自动从签订日期+约期计算</small></div></div>
+    <div><label>签订单位</label><input id="f_ctunit" placeholder="如：XXX 有限公司"></div>
+    <div style="margin-top:8px"><label>备注</label><input id="f_ctnotes" placeholder="特殊情况备注..."></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="saveContract('${editId||''}')">${editId?'保存':'添加'}</button></div>
+  `);
+  if (editId) {
+    (async () => {
+      try {
+        const contracts = await apiGet('/api/contracts');
+        const found = contracts.find(x => x.id === editId);
+        if (found) {
+          document.getElementById('f_ctname').value = found.name||'';
+          document.getElementById('f_ctdept').value = found.dept||'';
+          document.getElementById('f_ctentry').value = found.entryDate||'';
+          document.getElementById('f_ctsign').value = found.signDate||'';
+          document.getElementById('f_ctdur').value = found.duration||'';
+          document.getElementById('f_ctend').value = found.endDate||'';
+          document.getElementById('f_ctunit').value = found.signUnit||'';
+          document.getElementById('f_ctnotes').value = found.notes||'';
+        }
+      } catch(e) {}
+    })();
+  }
+}
+
+async function saveContract(editId) {
+  const name = document.getElementById('f_ctname').value.trim();
+  if (!name) { showToast('请输入员工姓名'); return; }
+  const durationVal = document.getElementById('f_ctdur').value;
+  const data = {
+    name,
+    dept: document.getElementById('f_ctdept').value.trim(),
+    entryDate: document.getElementById('f_ctentry').value,
+    signDate: document.getElementById('f_ctsign').value,
+    duration: durationVal ? parseInt(durationVal) : null,
+    endDate: document.getElementById('f_ctend').value,
+    signUnit: document.getElementById('f_ctunit').value.trim(),
+    notes: document.getElementById('f_ctnotes').value.trim()
+  };
+  try {
+    if (editId) await apiPut('/api/contracts/'+editId, data);
+    else await apiPost('/api/contracts', data);
+    closeModal(); await render(); showToast(editId?'已更新':'已添加');
+  } catch(e) { showToast(e.message); }
+}
+
+function editContract(id) { showAddContract(id); }
+
+async function deleteContract(id) {
+  if (!confirm('确定删除？')) return;
+  try { await apiDelete('/api/contracts/'+id); await render(); showToast('已删除'); }
+  catch(e) { showToast(e.message); }
+}
+
+async function batchDeleteContracts() {
+  const ids = getSelectedIds();
+  if (ids.length === 0) return;
+  if (!confirm(`确定批量删除 ${ids.length} 份合同？此操作不可撤销！`)) return;
+  try {
+    const res = await apiPost('/api/contracts/batch-delete', { ids });
+    await render();
+    showToast(`已删除 ${res.removed} 份合同`);
+  } catch(e) { showToast(e.message); }
+}
+
+async function batchDeleteInterviews() {
+  const ids = getSelectedIds();
+  if (ids.length === 0) return;
+  if (!confirm(`确定批量删除 ${ids.length} 条面试记录？此操作不可撤销！`)) return;
+  try {
+    const res = await apiPost('/api/interviews/batch-delete', { ids });
+    await render();
+    showToast(`已删除 ${res.removed} 条面试记录`);
+  } catch(e) { showToast(e.message); }
+}
+
+async function batchDeletePositions() {
+  const ids = getSelectedIds();
+  if (ids.length === 0) return;
+  if (!confirm(`确定批量删除 ${ids.length} 个岗位？此操作不可撤销！`)) return;
+  try {
+    const res = await apiPost('/api/positions/batch-delete', { ids });
+    await render();
+    showToast(`已删除 ${res.removed} 个岗位`);
+  } catch(e) { showToast(e.message); }
+}
+
+async function handleContractUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const rows = await parseUploadedSpreadsheet(file);
+  if (rows.length === 0) { showToast('未解析到数据'); return; }
+  const items = rows.map((r, i) => {
+    const durRaw = r['合同约期（年）'] !== undefined ? r['合同约期（年）'] :
+                   r['合同约期(年)'] !== undefined ? r['合同约期(年)'] :
+                   r['合同约期'] !== undefined ? r['合同约期'] :
+                   r['duration'];
+    return {
+      seq: r['序号'] !== undefined && r['序号'] !== '' ? parseInt(r['序号']) : (i + 1),
+      name: r['员工姓名'] || r['员工'] || r['姓名'] || r['name'] || '',
+      dept: r['部门'] || r['dept'] || '',
+      entryDate: r['入职日期'] || r['entryDate'] || '',
+      signDate: r['签订日期'] || r['signDate'] || '',
+      duration: durRaw !== undefined && durRaw !== '' ? parseInt(String(durRaw).replace(/[^0-9]/g, '')) : null,
+      endDate: r['到期日期'] || r['endDate'] || '',
+      signUnit: r['签订单位'] || r['signUnit'] || '',
+      notes: r['备注'] || r['notes'] || ''
+    };
+  }).filter(x => x.name);
+  if (items.length === 0) { showToast('未识别有效数据'); event.target.value = ''; return; }
+  if (!confirm(`解析到 ${items.length} 条合同，确认导入？`)) { event.target.value = ''; return; }
+  try {
+    const res = await apiPost('/api/contracts/batch', { items });
+    event.target.value = ''; await render();
+    showToast(`导入完成：${res.count} 条合同`);
+  } catch(e) { showToast(e.message); event.target.value = ''; }
+}
+
+function downloadContractTemplate() {
+  const BOM = '\uFEFF';
+  const headers = '序号,员工姓名,部门,入职日期,签订日期,合同约期（年）,到期日期,签订单位,备注';
+  const sample = '1,张三,技术部,2026-07-01,2026-07-01,3,2029-07-01,HR工作台有限公司,三年期';
+  const csv = BOM + headers + '\n' + sample + '\n';
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '合同台账导入模板.csv';
+  a.click(); URL.revokeObjectURL(a.href);
+  showToast('模板已下载，用Excel填写后上传');
+}
+
+// ==================== Export/Import ====================
 // ==================== Export/Import ====================
 async function exportData() {
   if (isAdmin()) {
@@ -2137,8 +2861,10 @@ async function render() {
       try { users = await apiGet('/api/users'); } catch(e) {}
     }
     try { progress = await apiGet('/api/progress'); } catch(e) {}
+    let contracts = [];
+    try { contracts = await apiGet('/api/contracts'); } catch(e) {}
     
-    const todayItems = getTodayItems(todos, interviews, hires, positions);
+    const todayItems = getTodayItems(todos, interviews, hires, positions, contracts);
     renderCalendar(todos, interviews, todayItems);
     renderTeamOverview(positions, interviews, todos, hires, users);
     
@@ -2148,6 +2874,7 @@ async function render() {
       case 2: await renderTodos(todos); break;
       case 3: renderFollowUp(hires, templates); break;
       case 4: renderProgress(progress); break;
+      case 5: renderContracts(contracts); break;
     }
   } catch(e) {
     console.error('Render error:', e);

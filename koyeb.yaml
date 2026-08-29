@@ -1,0 +1,38 @@
+# Koyeb 应用定义 —— HR 工作台
+# 用法 A（CLI）：安装 Koyeb CLI 后执行  koyeb app deploy -f koyeb.yaml
+# 用法 B（控制台）：Koyeb 控制台「Create Web Service」→ 选 GitHub → 按下面字段填写
+# 注意：字段名以 Koyeb 当前文档为准：https://www.koyeb.com/docs
+#
+# 持久化说明（很重要）：
+#   - Koyeb 免费实例(eco/Hobby 512MB)【不能】挂持久卷(Volumes)，卷只能挂到付费 standard/GPU 实例。
+#   - 免费档要数据不丢，请用 Koyeb 附带的【免费 Postgres 数据库】：
+#       1) 在 Koyeb 控制台创建一个 Postgres 数据库（免费额度内）；
+#       2) 复制它的连接串，在 Service 环境变量里设  DATABASE_URL=<连接串>；
+#       3) 应用检测到 DATABASE_URL 会自动把 db.json 存进 Postgres，Redeploy 后数据还在。
+#   - 不设 DATABASE_URL 也能跑（用本地文件），但免费实例重启/缩容到零后本地文件会重置。
+
+app: hr-workbench
+
+services:
+  - name: web
+    type: web
+    git:
+      repo: https://github.com/wulunruhe20268060-cyber/hr-workbench
+      branch: master
+    run_command: node server.js
+    ports:
+      - port: 8080
+        type: http
+    scaling:
+      min: 1
+      max: 1
+    env:
+      - key: PORT
+        value: "8080"
+      - key: ADMIN_USER
+        value: admin
+      - key: ADMIN_PASS
+        value: admin123
+      # DATABASE_URL 由 Koyeb 免费 Postgres 提供，部署时在控制台填：
+      # - key: DATABASE_URL
+      #   value: postgres://user:pass@host:5432/dbname?sslmode=require

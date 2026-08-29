@@ -1,5 +1,12 @@
 node_modules/
 data/
 *.log
+*.tar.gz
 .DS_Store
 Thumbs.db
+addons*.js
+addons*.b64
+standalone.html
+patch_*.py
+deploy.sh
+.build/
