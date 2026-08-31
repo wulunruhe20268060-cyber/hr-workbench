@@ -376,7 +376,8 @@ app.post('/api/users', authMiddleware, adminOnly, (req, res) => {
     return res.status(400).json({ error: '用户名已存在' });
   }
   const salt = genSalt();
-  const userRole = role === 'contract_admin' ? 'contract_admin' : 'member';
+  const allowedRoles = ['admin', 'member', 'contract_admin'];
+  const userRole = allowedRoles.includes(role) ? role : 'member';
   const user = {
     id: genId(), username, displayName: displayName || username,
     role: userRole, salt, password: hashPass(password, salt),
@@ -410,6 +411,22 @@ app.put('/api/users/:id/password', authMiddleware, adminOnly, (req, res) => {
   user.password = hashPass(password, salt);
   saveDb();
   res.json({ ok: true });
+});
+
+// 修改成员角色（仅管理员）。至少保留一个管理员，避免全员失去管理权限。
+app.put('/api/users/:id/role', authMiddleware, adminOnly, (req, res) => {
+  const user = db.users.find(u => u.id === req.params.id);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
+  const { role } = req.body;
+  const allowedRoles = ['admin', 'member', 'contract_admin'];
+  if (!allowedRoles.includes(role)) return res.status(400).json({ error: '无效的角色' });
+  if (user.role === 'admin' && role !== 'admin') {
+    const adminCount = db.users.filter(u => u.role === 'admin').length;
+    if (adminCount <= 1) return res.status(400).json({ error: '至少保留一个管理员' });
+  }
+  user.role = role;
+  saveDb();
+  res.json({ ok: true, id: user.id, role: user.role });
 });
 
 // Admin change own password

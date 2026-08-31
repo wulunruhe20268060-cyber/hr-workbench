@@ -614,7 +614,7 @@ async function showTeamManage() {
       <input id="tm_user" placeholder="用户名">
       <input id="tm_name" placeholder="显示名称">
       <input type="password" id="tm_pass" placeholder="密码">
-      <select id="tm_role"><option value="member">普通成员</option><option value="contract_admin">合同管理员</option></select>
+      <select id="tm_role"><option value="admin">管理员</option><option value="member">普通成员</option><option value="contract_admin">合同管理员</option></select>
     </div>
     <button class="btn btn-primary btn-sm" onclick="addTeamMember()">添加成员</button>
   </div>`;
@@ -628,6 +628,14 @@ async function showTeamManage() {
       <td>${escapeHtml(u.displayName||'')}</td>
       <td><span class="role-tag ${u.role}">${roleLabel}</span></td>
       <td style="font-size:12px">${u.createdAt||'-'}</td>
+      <td>
+        <select id="role_${u.id}" class="role-select">
+          <option value="admin" ${u.role==='admin'?'selected':''}>管理员</option>
+          <option value="member" ${u.role==='member'?'selected':''}>普通成员</option>
+          <option value="contract_admin" ${u.role==='contract_admin'?'selected':''}>合同管理员</option>
+        </select>
+        <button class="btn btn-outline btn-xs" onclick="updateMemberRole('${u.id}')">保存</button>
+      </td>
       <td>
         <button class="btn btn-outline btn-xs" onclick="changeMemberPassword('${u.id}','${escapeHtml(u.username)}')">改密</button>
         ${u.role!=='admin' ? `<button class="btn btn-danger btn-xs" onclick="deleteTeamMember('${u.id}')">删除</button>` : ''}
@@ -667,6 +675,19 @@ async function changeMemberPassword(id, username) {
     await apiPut('/api/users/' + id + '/password', { password: pw });
     showToast('密码已更新');
   } catch(e) { showToast(e.message); }
+}
+
+async function updateMemberRole(id) {
+  const sel = document.getElementById('role_' + id);
+  const role = sel.value;
+  if (id === auth.userId) {
+    if (!confirm('你正在修改自己的角色，可能导致可见模块变化，确认继续？')) { showTeamManage(); return; }
+  }
+  try {
+    await apiPut('/api/users/' + id + '/role', { role });
+    showToast('角色已更新');
+    if (id === auth.userId) { auth.role = role; applyRoleGating(); }
+  } catch(e) { showToast(e.message); showTeamManage(); }
 }
 
 // ==================== Toast ====================
