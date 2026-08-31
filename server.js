@@ -260,6 +260,28 @@ function seedDb() {
   console.log('Member: zhangwei / 123456');
 }
 
+// 确保默认成员始终存在：每次启动检查，缺失则补建。
+// 这样无论本地文件存储还是切到 Postgres，重部署都不会丢失成员账号与权限。
+function ensureDefaultUsers() {
+  const defaults = [
+    { username: 'shijun', password: 'shijun123', role: 'member', displayName: '施骏' },
+    { username: 'wangyan', password: 'wangyan123', role: 'member', displayName: '王燕' },
+    { username: 'zhangliwen', password: 'zhangliwen123', role: 'member', displayName: '张丽雯' }
+  ];
+  let changed = false;
+  for (const u of defaults) {
+    if (db.users.find(x => x.username === u.username)) continue;
+    const salt = genSalt();
+    db.users.push({
+      id: genId(), username: u.username, role: u.role,
+      salt, password: hashPass(u.password, salt), displayName: u.displayName
+    });
+    changed = true;
+    console.log(`Ensured default member: ${u.username} / ${u.displayName}`);
+  }
+  if (changed) saveDb();
+}
+
 // ========== Auth Middleware ==========
 function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -1467,6 +1489,7 @@ app.get('*', (req, res) => {
   migrateInterviews();
   migrateTemplates();
   seedDb();
+  ensureDefaultUsers();
 
   app.listen(PORT, () => {
     console.log(`HR Workbench server running on http://localhost:${PORT} (store: ${usePg ? 'postgres' : 'file'})`);
