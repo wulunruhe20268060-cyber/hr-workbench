@@ -1281,7 +1281,7 @@ function migrateTemplates() {
 // are set; otherwise falls back to the free Doubao endpoint via DOUBAO_SESSIONID; otherwise
 // returns a friendly AI_NOT_CONFIGURED error (no crash).
 async function callAI(systemPrompt, userPrompt) {
-  const fallback = process.env.DOUBAO_SESSIONID ? 'https://doubao-free-api.vercel.app/v1/chat/completions' : '';
+  const fallback = process.env.DOUBAO_SESSIONID ? (process.env.DOUBAO_BASE_URL || 'https://doubao-free-api.vercel.app/v1/chat/completions') : '';
   const base = process.env.AI_BASE_URL || fallback;
   if (!base) {
     const err = new Error('AI 未配置：请在环境变量设置 AI_BASE_URL/AI_API_KEY/AI_MODEL，或 DOUBAO_SESSIONID');
