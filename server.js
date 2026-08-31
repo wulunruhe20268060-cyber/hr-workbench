@@ -3,6 +3,23 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+// ========== Proxy support for outbound fetch (AI calls) ==========
+// Node's global fetch (undici) ignores HTTP(S)_PROXY by default. When a system
+// proxy is present (e.g. corporate/sandbox egress), route AI calls through it so
+// external gateways (vercel/openai) become reachable. On hosts without a proxy
+// (e.g. Render) this is a no-op and calls go direct.
+(function setupProxy() {
+  const proxy = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
+  if (!proxy) return;
+  try {
+    const { ProxyAgent, setGlobalDispatcher } = require('undici');
+    setGlobalDispatcher(new ProxyAgent(proxy));
+    console.log('[proxy] outbound fetch will use proxy:', proxy);
+  } catch (e) {
+    console.log('[proxy] undici not available, skipping proxy setup:', e.message);
+  }
+})();
+
 const app = express();
 const PORT = process.env.PORT || 80;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
