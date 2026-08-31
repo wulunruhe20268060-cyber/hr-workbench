@@ -12,10 +12,13 @@ timeout /t 2 /nobreak >nul
 set DATA_DIR=F:/workbuddy/hr-team/data
 set PORT=80
 
-REM ---- Option A: Doubao free API (zero cost) ----
-REM  Works on Render (overseas). On some local networks the vercel
-REM  gateway is blocked, in which case use Option B instead.
-set DOUBAO_SESSIONID=__PASTE_YOUR_SESSIONID_HERE__
+REM ---- Option A: self-hosted Doubao free API on Render (zero cost) ----
+REM  Deploy doubao-free-api to your OWN Render account (connect the public
+REM  repo, build: npm run build, start: node dist/index.js, port 8000).
+REM  Then paste YOUR instance URL below. The public vercel instance is dead;
+REM  self-hosting on Render (overseas) can reach www.doubao.com.
+set DOUBAO_BASE_URL=https://your-doubao-instance.onrender.com/v1/chat/completions
+set DOUBAO_SESSIONID=80b0e08fa724194ce8c7e8d6ff46cb92
 
 REM ---- Option B: domestic free gateway (works locally) ----
 REM  Uncomment the 3 lines below and fill your SiliconFlow key.
