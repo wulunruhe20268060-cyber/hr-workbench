@@ -13,8 +13,10 @@ set DATA_DIR=F:/workbuddy/hr-team/data
 set PORT=80
 
 REM ---- Option A: self-hosted Doubao free API on Render (zero cost) ----
-REM  Deploy doubao-free-api to your OWN Render account (connect the public
-REM  repo, build: npm run build, start: node dist/index.js, port 8000).
+REM  Deploy doubao-free-api to your OWN Render account from the public Docker
+REM  image vinlic/doubao-free-api:latest. Render: New -> Web Service ->
+REM  "deploy an existing image from a registry", image=vinlic/doubao-free-api:latest,
+REM  port 8000, health check path /ping. No GitHub repo needed.
 REM  Then paste YOUR instance URL below. The public vercel instance is dead;
 REM  self-hosting on Render (overseas) can reach www.doubao.com.
 set DOUBAO_BASE_URL=https://your-doubao-instance.onrender.com/v1/chat/completions
