@@ -1431,6 +1431,11 @@ addCrud('questionBanks');
 addCrud('hiringDecisions');
 addCrud('probations');
 
+// ========== Health endpoint (register BEFORE the SPA fallback so the wildcard never shadows it) ==========
+app.get('/health', (req, res) => {
+  res.json({ ok: true, ts: Date.now(), store: usePg ? 'postgres' : 'file', interviews: db.interviews.length, positions: db.positions.length });
+});
+
 // ========== SPA fallback (must be LAST so it never shadows /api routes) ==========
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -1462,11 +1467,6 @@ app.get('*', (req, res) => {
   migrateInterviews();
   migrateTemplates();
   seedDb();
-
-  // Health endpoint for Koyeb/Render wake-up + monitoring
-  app.get('/health', (req, res) => {
-    res.json({ ok: true, ts: Date.now(), store: usePg ? 'postgres' : 'file', interviews: db.interviews.length, positions: db.positions.length });
-  });
 
   app.listen(PORT, () => {
     console.log(`HR Workbench server running on http://localhost:${PORT} (store: ${usePg ? 'postgres' : 'file'})`);
