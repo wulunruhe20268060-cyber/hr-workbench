@@ -16,7 +16,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.disable('etag');
 
 // ========== Database ==========
-let db = { users: [], positions: [], interviews: [], todos: [], templates: [], hires: [], progress: [], contracts: [] };
+let db = { users: [], positions: [], interviews: [], todos: [], templates: [], hires: [], progress: [], contracts: [], jobSpecs: [], candidates: [], questionBanks: [], hiringDecisions: [], probations: [] };
 let tokens = {};
 
 // ---- Postgres (optional): used when DATABASE_URL is set, else falls back to JSON file ----
@@ -239,6 +239,19 @@ function seedDb() {
     { id: genId(), seq: 1, name: '李明', dept: '技术部', entryDate: '2026-07-01', signDate: '2026-07-01', duration: 1, endDate: '2027-07-01', signUnit: 'HR工作台有限公司', notes: '', createdBy: m1Id, createdAt: ys },
     { id: genId(), seq: 2, name: '王芳', dept: '人力资源部', entryDate: '2026-06-01', signDate: '2026-06-01', duration: 3, endDate: '2029-06-01', signUnit: 'HR工作台有限公司', notes: '三年期', createdBy: m1Id, createdAt: ys },
     { id: genId(), seq: 3, name: '测试员工', dept: '市场部', entryDate: '2026-07-01', signDate: '2026-07-01', duration: 1, endDate: '2026-08-08', signUnit: 'HR工作台有限公司', notes: '即将到期，需催办', createdBy: m1Id, createdAt: ys }
+  ];
+
+  // AI Recruitment Assistant demo seed (job spec sample)
+  db.jobSpecs = [
+    { id: genId(), position: 'HRBP', dept: '人力资源部', level: '中级',
+      responsibilities: '负责业务部门的HR伙伴工作，包含招聘、员工关系、组织氛围建设',
+      jd: 'HRBP 岗位说明书（示例）：负责对接业务部门，提供人力资源解决方案，推动人才梯队建设，优化组织效能。',
+      competencies: [
+        { name: '硬技能', weight: 40, items: [{ name: '劳动法合规', desc: '熟悉劳动合同法及用工风险' }, { name: '数据分析', desc: '能用数据驱动HR决策' }] },
+        { name: '软技能', weight: 35, items: [{ name: '沟通协调', desc: '跨部门高效沟通' }, { name: '影响力', desc: '推动业务负责人行动' }] },
+        { name: '职业素养', weight: 25, items: [{ name: '保密意识', desc: '严守薪酬与人事信息保密' }, { name: '责任心', desc: '对结果负责' }] }
+      ],
+      createdBy: adminId, createdAt: now }
   ];
 
   saveDb();
@@ -1110,6 +1123,23 @@ app.post('/api/migrate', authMiddleware, (req, res) => {
     });
   }
   
+  // Migrate AI recruitment collections
+  if (Array.isArray(data.jobSpecs)) {
+    data.jobSpecs.forEach(j => { db.jobSpecs.unshift({ ...j, id: genId(), createdBy: req.userId, createdAt: now }); count++; });
+  }
+  if (Array.isArray(data.candidates)) {
+    data.candidates.forEach(c => { db.candidates.unshift({ ...c, id: genId(), createdBy: req.userId, createdAt: now }); count++; });
+  }
+  if (Array.isArray(data.questionBanks)) {
+    data.questionBanks.forEach(q => { db.questionBanks.unshift({ ...q, id: genId(), createdBy: req.userId, createdAt: now }); count++; });
+  }
+  if (Array.isArray(data.hiringDecisions)) {
+    data.hiringDecisions.forEach(h => { db.hiringDecisions.unshift({ ...h, id: genId(), createdBy: req.userId, createdAt: now }); count++; });
+  }
+  if (Array.isArray(data.probations)) {
+    data.probations.forEach(p => { db.probations.unshift({ ...p, id: genId(), createdBy: req.userId, createdAt: now }); count++; });
+  }
+
   saveDb();
   res.json({ count, message: `成功迁移 ${count} 条数据` });
 });
@@ -1124,6 +1154,11 @@ app.get('/api/export', authMiddleware, adminOnly, (req, res) => {
     hires: db.hires,
     progress: db.progress,
     contracts: db.contracts || [],
+    jobSpecs: db.jobSpecs,
+    candidates: db.candidates,
+    questionBanks: db.questionBanks,
+    hiringDecisions: db.hiringDecisions,
+    probations: db.probations,
     exportedAt: new Date().toISOString(),
     version: '2.0'
   };
@@ -1140,14 +1175,18 @@ app.post('/api/import', authMiddleware, adminOnly, (req, res) => {
   if (data.hires) { db.hires = data.hires; count += data.hires.length; }
   if (data.progress) { db.progress = data.progress; count += data.progress.length; }
   if (data.contracts) { db.contracts = data.contracts; count += data.contracts.length; }
+  if (data.jobSpecs) { db.jobSpecs = data.jobSpecs; count += data.jobSpecs.length; }
+  if (data.candidates) { db.candidates = data.candidates; count += data.candidates.length; }
+  if (data.questionBanks) { db.questionBanks = data.questionBanks; count += data.questionBanks.length; }
+  if (data.hiringDecisions) { db.hiringDecisions = data.hiringDecisions; count += data.hiringDecisions.length; }
+  if (data.probations) { db.probations = data.probations; count += data.probations.length; }
   saveDb();
   res.json({ count });
 });
 
-// ========== SPA fallback ==========
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+// ========== SPA fallback (registered LAST so it never shadows API routes) ==========
+// NOTE: this is intentionally placed after all /api routes. It is defined again below
+// right before app.listen. Do not re-add a wildcard here.
 
 // Migrate old interview fields to new schema
 function migrateInterviews() {
@@ -1198,10 +1237,227 @@ function migrateTemplates() {
   if (migrated) { saveDb(); console.log('Migrated templates: added category field'); }
 }
 
+// ========== AI Recruitment Assistant ==========
+// Pluggable AI provider: uses OpenAI-compatible endpoint if AI_BASE_URL/AI_API_KEY/AI_MODEL
+// are set; otherwise falls back to the free Doubao endpoint via DOUBAO_SESSIONID; otherwise
+// returns a friendly AI_NOT_CONFIGURED error (no crash).
+async function callAI(systemPrompt, userPrompt) {
+  const fallback = process.env.DOUBAO_SESSIONID ? 'https://doubao-free-api.vercel.app/v1/chat/completions' : '';
+  const base = process.env.AI_BASE_URL || fallback;
+  if (!base) {
+    const err = new Error('AI 未配置：请在环境变量设置 AI_BASE_URL/AI_API_KEY/AI_MODEL，或 DOUBAO_SESSIONID');
+    err.code = 'AI_NOT_CONFIGURED';
+    throw err;
+  }
+  const apiKey = process.env.AI_API_KEY || process.env.DOUBAO_SESSIONID || '';
+  const model = process.env.AI_MODEL || (process.env.DOUBAO_SESSIONID ? 'doubao' : 'gpt-4o-mini');
+  const body = {
+    model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ],
+    stream: false
+  };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 120000);
+  try {
+    const r = await fetch(base, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify(body),
+      signal: ctrl.signal
+    });
+    const j = await r.json().catch(() => ({}));
+    if (j.error) throw new Error(typeof j.error === 'string' ? j.error : j.error.message || 'AI 接口错误');
+    const content = j.choices && j.choices[0] && j.choices[0].message ? j.choices[0].message.content : '';
+    if (!content) throw new Error('AI 返回内容为空');
+    return content;
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('AI 调用超时（120秒）');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Extract JSON from AI text (handles code fences / prose wrapping)
+function extractJson(text) {
+  if (typeof text !== 'string') return text;
+  try { return JSON.parse(text.trim()); } catch (e) {}
+  // strip code fences
+  let t = text.replace(/```(?:json)?/gi, '').trim();
+  try { return JSON.parse(t); } catch (e) {}
+  const obj = t.match(/\{[\s\S]*\}/);
+  if (obj) { try { return JSON.parse(obj[0]); } catch (e) {} }
+  const arr = t.match(/\[[\s\S]*\]/);
+  if (arr) { try { return JSON.parse(arr[0]); } catch (e) {} }
+  throw new Error('AI 返回内容无法解析为 JSON');
+}
+
+async function aiJson(res, systemPrompt, userPrompt) {
+  try {
+    const text = await callAI(systemPrompt, userPrompt);
+    res.json(extractJson(text));
+  } catch (e) {
+    if (e.code === 'AI_NOT_CONFIGURED') return res.status(400).json({ error: e.message });
+    res.status(500).json({ error: 'AI 调用失败：' + e.message });
+  }
+}
+
+// Generic chat
+app.post('/api/ai/chat', authMiddleware, async (req, res) => {
+  try {
+    const text = await callAI(req.body.system || '你是一个专业的 HR 招聘助手。', req.body.prompt || '');
+    res.json({ text });
+  } catch (e) {
+    if (e.code === 'AI_NOT_CONFIGURED') return res.status(400).json({ error: e.message });
+    res.status(500).json({ error: 'AI 调用失败：' + e.message });
+  }
+});
+
+// 1. JD generation
+app.post('/api/ai/jd', authMiddleware, (req, res) => {
+  const { position, dept, level, responsibilities, requirements } = req.body;
+  const system = '你是资深 HR 专家，擅长撰写规范、合规的岗位说明书（JD）。必须输出 JSON：{"jd":"...","complianceNotes":"...","duties":["...","..."]}。JD 用中文、条理清晰；合规提示要指出是否存在年龄/性别/地域等就业歧视风险并给出修改建议。';
+  const user = `岗位名称：${position||''}\n部门：${dept||''}\n层级：${level||''}\n核心职责：${responsibilities||''}\n任职要求：${requirements||''}\n请生成规范 JD、合规提示与核心职责列表。`;
+  aiJson(res, system, user);
+});
+
+// 2. Competency decomposition
+app.post('/api/ai/competency', authMiddleware, (req, res) => {
+  const { position, dept, level, responsibilities } = req.body;
+  const system = '你是招聘测评专家。将岗位要求拆解为三大类：硬技能、软技能、职业素养。输出 JSON：{"dimensions":[{"name":"硬技能|软技能|职业素养","weight":0-100,"items":[{"name":"...","desc":"..."}]}]}，三类 weight 之和=100。';
+  const user = `岗位：${position||''}\n部门：${dept||''}\n层级：${level||''}\n职责：${responsibilities||''}\n请给出胜任力维度与权重拆解。`;
+  aiJson(res, system, user);
+});
+
+// 3. Resume parsing -> talent registry
+app.post('/api/ai/parse-resume', authMiddleware, (req, res) => {
+  const { text } = req.body;
+  if (!text || !text.trim()) return res.status(400).json({ error: '请粘贴简历文本' });
+  const system = `你是简历解析引擎。将简历文本解析为标准《人才登记表》结构化字段。输出 JSON：
+{"basic":{"name":"","gender":"","birthDate":"","age":null,"location":"","maritalStatus":"","phone":"","currentSalary":"","expectedSalary":""},
+"education":[{"school":"","major":"","degree":"","gradDate":""}],
+"work":[{"company":"","position":"","startDate":"","endDate":"","leaveReason":""}],
+"projects":[{"name":"","role":"","desc":""}],
+"skills":["..."],
+"certificates":["..."]}`;
+  aiJson(res, system, '请解析以下简历：\n' + text);
+});
+
+// 4. Candidate-job matching score
+app.post('/api/ai/match', authMiddleware, (req, res) => {
+  const { jobSpec, candidate } = req.body;
+  const system = '你是招聘匹配评估专家。基于岗位胜任力标准评估候选人。输出 JSON：{"score":0-100,"matched":["匹配项..."],"gaps":["短板项..."],"summary":"综合评语"}。';
+  const user = `岗位标准：${JSON.stringify(jobSpec||{})}\n候选人信息：${JSON.stringify(candidate||{})}\n请给出 0-100 匹配度评分。`;
+  aiJson(res, system, user);
+});
+
+// 5. Resume anomaly check
+app.post('/api/ai/anomaly', authMiddleware, (req, res) => {
+  const { text } = req.body;
+  if (!text || !text.trim()) return res.status(400).json({ error: '请提供简历文本或解析结果' });
+  const system = '你是简历背景调查专家。排查简历疑点。输出 JSON：{"issues":[{"type":"时间断层|经历重叠|年龄学历不符|频繁跳槽|薪资异常","desc":"...","severity":"高|中|低"}]}。';
+  aiJson(res, system, '请核查以下简历：\n' + text);
+});
+
+// 6. Interview question bank generation
+app.post('/api/ai/questions', authMiddleware, (req, res) => {
+  const { position, competencies, candidateBackground, durationMin } = req.body;
+  const system = `你是面试命题专家。生成定制化面试题本。输出 JSON：
+{"questions":[{"category":"基础胜任力|专业能力|行为事件(STAR)|情景模拟|简历追问","question":"...","points":"考察要点","scoreStd":"0-10分评分标准","followUp":"参考追问话术"}],
+"scoreTable":[{"dimension":"...","weight":0-100}]}`;
+  const user = `岗位：${position||''}\n胜任力标准：${JSON.stringify(competencies||{})}\n候选人背景：${candidateBackground||''}\n面试时长：${durationMin||45}分钟。请生成对应题量与难度的题本及评分表。`;
+  aiJson(res, system, user);
+});
+
+// 7. Hiring decision report
+app.post('/api/ai/decision', authMiddleware, (req, res) => {
+  const { candidate, matchResult, interviewScores } = req.body;
+  const system = '你是录用决策专家。整合信息生成综合评估报告。输出 JSON：{"strengths":["..."],"risks":["..."],"salarySuggestion":{"range":"...","notes":"..."},"recommendation":"建议录用|建议储备|不建议录用","summary":"综合评语"}。';
+  const user = `候选人：${JSON.stringify(candidate||{})}\n匹配结果：${JSON.stringify(matchResult||{})}\n面试评分：${JSON.stringify(interviewScores||{})}\n请给出录用决策建议。`;
+  aiJson(res, system, user);
+});
+
+// 8. Probation plan
+app.post('/api/ai/probation', authMiddleware, (req, res) => {
+  const { position, competencies, durationMonths } = req.body;
+  const system = '你是试用期管理专家。基于岗位胜任力拆解试用期目标。输出 JSON：{"goals":[{"phase":"第1月|第2月|第3月|第4-6月","objective":"...","kpi":"可量化指标"}],"evalTemplate":"评估要点说明","decisionAdvice":"转正/延长/不转正判断逻辑"}。';
+  const user = `岗位：${position||''}\n胜任力：${JSON.stringify(competencies||{})}\n试用期：${durationMonths||3}个月。请拆解阶段目标。`;
+  aiJson(res, system, user);
+});
+
+// ========== Generic CRUD factory for new collections ==========
+function addCrud(collection) {
+  const cap = collection;
+  app.get(`/api/${cap}`, authMiddleware, (req, res) => {
+    res.json(filterByUser(db[cap], req.userId, req.user.role));
+  });
+  app.post(`/api/${cap}`, authMiddleware, (req, res) => {
+    const item = {
+      id: genId(), ...req.body,
+      createdBy: req.userId,
+      createdAt: new Date().toISOString().split('T')[0]
+    };
+    db[cap].unshift(item);
+    saveDb();
+    res.json(item);
+  });
+  app.put(`/api/${cap}/:id`, authMiddleware, (req, res) => {
+    const idx = db[cap].findIndex(x => x.id === req.params.id);
+    if (idx < 0) return res.status(404).json({ error: '记录不存在' });
+    if (req.user.role !== 'admin' && db[cap][idx].createdBy !== req.userId) {
+      return res.status(403).json({ error: '无权修改他人记录' });
+    }
+    db[cap][idx] = { ...db[cap][idx], ...req.body };
+    saveDb();
+    res.json(db[cap][idx]);
+  });
+  app.delete(`/api/${cap}/:id`, authMiddleware, (req, res) => {
+    const idx = db[cap].findIndex(x => x.id === req.params.id);
+    if (idx < 0) return res.status(404).json({ error: '记录不存在' });
+    if (req.user.role !== 'admin' && db[cap][idx].createdBy !== req.userId) {
+      return res.status(403).json({ error: '无权删除他人记录' });
+    }
+    db[cap].splice(idx, 1);
+    saveDb();
+    res.json({ ok: true });
+  });
+}
+addCrud('jobSpecs');
+addCrud('candidates');
+addCrud('questionBanks');
+addCrud('hiringDecisions');
+addCrud('probations');
+
+// ========== SPA fallback (must be LAST so it never shadows /api routes) ==========
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 // ========== Start ==========
 (async () => {
   await initStore();
   if (!db.contracts) db.contracts = [];
+  // Ensure newly-added collections exist even when loading an older db.json
+  ['jobSpecs', 'candidates', 'questionBanks', 'hiringDecisions', 'probations'].forEach(k => { if (!db[k]) db[k] = []; });
+  // Seed a demo job spec once (so the module is usable immediately on existing DBs)
+  if (db.jobSpecs.length === 0) {
+    const now = new Date().toISOString().split('T')[0];
+    db.jobSpecs.push({
+      id: genId(), position: 'HRBP', dept: '人力资源部', level: '中级',
+      responsibilities: '负责业务部门的HR伙伴工作，包含招聘、员工关系、组织氛围建设',
+      jd: 'HRBP 岗位说明书（示例）：负责对接业务部门，提供人力资源解决方案，推动人才梯队建设，优化组织效能。',
+      competencies: [
+        { name: '硬技能', weight: 40, items: [{ name: '劳动法合规', desc: '熟悉劳动合同法及用工风险' }, { name: '数据分析', desc: '能用数据驱动HR决策' }] },
+        { name: '软技能', weight: 35, items: [{ name: '沟通协调', desc: '跨部门高效沟通' }, { name: '影响力', desc: '推动业务负责人行动' }] },
+        { name: '职业素养', weight: 25, items: [{ name: '保密意识', desc: '严守薪酬与人事信息保密' }, { name: '责任心', desc: '对结果负责' }] }
+      ],
+      createdBy: db.users[0] ? db.users[0].id : 'system', createdAt: now
+    });
+    saveDb();
+  }
   migrateHires();
   migrateInterviews();
   migrateTemplates();
