@@ -11,8 +11,6 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: "10000"
       # 可选：填一个外部免费 Postgres 的连接串即可让数据持久化（不填则用本地文件，重部署会重置）
       # - key: DATABASE_URL
       #   value: postgres://user:pass@host:5432/dbname
