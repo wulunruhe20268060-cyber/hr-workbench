@@ -2,6 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const docxExport = require('./docxExport');
 
 // ========== Proxy support for outbound fetch (AI calls) ==========
 // Node's global fetch (undici) ignores HTTP(S)_PROXY by default. When a system
@@ -1639,6 +1640,25 @@ app.get('*', (req, res) => {
   migrateTemplates();
   seedDb();
   ensureDefaultUsers();
+
+  // 输出文档 .docx 导出（规范：人才登记表/题本/评估报告/录用建议 等）
+  app.post('/api/ai/export-docx', authMiddleware, async (req, res) => {
+    try {
+      const { type, data } = req.body || {};
+      if (!type || !data) return res.status(400).json({ error: '缺少 type 或 data' });
+      const document = docxExport.buildDocx(type, data);
+      const buf = await docxExport.toBuffer(document);
+      const names = { talentRegister: '人才登记表', questionBank: '面试题本', evalReport: '评估报告', hireProposal: '录用建议', probationPlan: '试用期方案', jobSpec: '岗位说明书' };
+      const base = (names[type] || '文档') + '_' + (data.name || data.candidateName || data.title || 'export');
+      const enc = encodeURIComponent(base + '.docx');
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename="export.docx"; filename*=UTF-8''${enc}`);
+      res.send(buf);
+    } catch (e) {
+      console.error('[export-docx]', e.message);
+      res.status(500).json({ error: '生成文档失败：' + e.message });
+    }
+  });
 
   app.listen(PORT, () => {
     console.log(`HR Workbench server running on http://localhost:${PORT} (store: ${usePg ? 'postgres' : 'file'})`);
