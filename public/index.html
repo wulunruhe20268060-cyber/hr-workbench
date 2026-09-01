@@ -3010,17 +3010,19 @@ document.getElementById('loginUser').addEventListener('keydown', function(e) {
 // ==================== AI 招聘助手 ====================
 let recruitAIState = {
   sub: 'job',
-  jobResult: null, competencyResult: null,
-  resumeResult: null, matchResult: null, anomalyResult: null,
-  questionsResult: null, decisionResult: null, probationResult: null,
+  jobResult: null,
+  batch: [],
+  questionsResult: null, _qbCand: null, _qbJob: null,
+  decisionResult: null,
+  probationResult: null, _pbCand: null, _pbJob: null,
   jobs: [], candidates: [], qb: [], decisions: [], probations: []
 };
 
 function ensureAIStyles() {
   if (document.getElementById('aiStyles')) return;
-  const s = document.createElement('style');
-  s.id = 'aiStyles';
-  s.textContent = `
+  const st = document.createElement('style');
+  st.id = 'aiStyles';
+  st.textContent = `
   .ai-subtabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
   .ai-subtab{border:1px solid var(--border);background:var(--card);color:var(--text2);border-radius:20px;padding:7px 14px;font-size:13px;cursor:pointer;font-family:inherit}
   .ai-subtab.active{background:var(--primary);color:#fff;border-color:var(--primary)}
@@ -3031,7 +3033,7 @@ function ensureAIStyles() {
   .ai-field input,.ai-field textarea,.ai-field select{width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;box-sizing:border-box;background:#fff;color:var(--text)}
   .ai-field textarea{min-height:80px;resize:vertical}
   .ai-row{display:flex;gap:12px;flex-wrap:wrap}
-  .ai-row>.ai-field{flex:1;min-width:160px}
+  .ai-row>.ai-field{flex:1;min-width:150px}
   .ai-result{background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:14px;margin-top:12px;white-space:pre-wrap;font-size:14px;line-height:1.7}
   .ai-muted{color:var(--text2);font-size:12px}
   .ai-pill{display:inline-block;background:var(--primary-light);color:var(--primary);border-radius:12px;padding:2px 10px;font-size:12px;margin:2px}
@@ -3041,8 +3043,12 @@ function ensureAIStyles() {
   .ai-q .cat{font-size:11px;font-weight:700;color:var(--primary)}
   .ai-q .q{font-weight:600;margin:4px 0}
   .ai-q .sub{font-size:12px;color:var(--text2);line-height:1.6}
+  .ai-table{width:100%;border-collapse:collapse;font-size:13px}
+  .ai-table th,.ai-table td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}
+  .ai-table th{background:var(--primary-light);color:var(--primary);font-weight:700}
+  .ai-batch-card{margin-bottom:14px}
   `;
-  document.head.appendChild(s);
+  document.head.appendChild(st);
 }
 
 async function renderRecruitAI() {
@@ -3082,24 +3088,34 @@ async function renderJobSpec() {
   const jobs = await apiGet('/api/jobSpecs').catch(() => []);
   recruitAIState.jobs = jobs;
   const r = recruitAIState.jobResult;
-  const comp = recruitAIState.competencyResult;
   let html = `<div class="ai-card">
-    <h3>岗位说明书（JD）智能生成 + 胜任力拆解</h3>
+    <h3>岗位说明书（JD）智能生成 + 胜任力模型</h3>
     <div class="ai-row">
       <div class="ai-field"><label>岗位名称</label><input id="js_position" placeholder="如：HRBP"></div>
-      <div class="ai-field"><label>部门</label><input id="js_dept" placeholder="如：人力资源部"></div>
-      <div class="ai-field"><label>层级</label><input id="js_level" placeholder="如：中级/高级"></div>
+      <div class="ai-field"><label>所属部门</label><input id="js_dept" placeholder="如：人力资源部"></div>
+      <div class="ai-field"><label>岗位层级</label><input id="js_level" placeholder="如：中级"></div>
     </div>
-    <div class="ai-field"><label>核心职责</label><textarea id="js_resp" placeholder="一句话描述核心职责…"></textarea></div>
-    <div class="ai-field"><label>任职要求</label><textarea id="js_req" placeholder="学历、经验、技能等…"></textarea></div>
+    <div class="ai-field"><label>核心职责（一句话描述，作为 AI 生成种子）</label><textarea id="js_resp" placeholder="一句话描述核心职责…"></textarea></div>
+    <div class="ai-field"><label>任职要求（学历/经验/技能要点，作为 AI 生成种子）</label><textarea id="js_req" placeholder="学历、经验、技能等…"></textarea></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn btn-primary" id="btnJsJd" onclick="aiJobJD()">AI 生成 JD</button>
-      <button class="btn btn-primary" id="btnJsComp" onclick="aiJobComp()">AI 拆解胜任力</button>
+      <button class="btn btn-primary" id="btnJsJd" onclick="aiJobJD()">AI 一键生成岗位简章+胜任力</button>
       <button class="btn btn-outline" onclick="saveJobSpec()">保存岗位标准</button>
-    </div>
-    ${r ? `<div class="ai-result"><b>JD：</b>\n${escapeHtml(r.jd||'')}\n\n<b>合规提示：</b>${escapeHtml(r.complianceNotes||'')}\n\n<b>核心职责：</b>\n${(r.duties||[]).map(d=>'· '+d).join('\n')}</div>` : ''}
-    ${comp ? `<div class="ai-result"><b>胜任力维度与权重：</b>\n${comp.dimensions.map(d=>`【${d.name}】权重 ${d.weight}\n`+(d.items||[]).map(i=>'  - '+i.name+'：'+i.desc).join('\n')).join('\n')}</div>` : ''}
-  </div>`;
+    </div>`;
+  if (r) {
+    html += `<div class="ai-result" style="white-space:normal">
+      <div class="ai-row" style="margin-bottom:10px">
+        <div class="ai-field"><label>岗位名称</label><input id="js_r_position" value="${escapeHtml(r.position||'')}"></div>
+        <div class="ai-field"><label>所属部门</label><input id="js_r_dept" value="${escapeHtml(r.dept||'')}"></div>
+        <div class="ai-field"><label>岗位层级</label><input id="js_r_level" value="${escapeHtml(r.level||'')}"></div>
+      </div>
+      <div class="ai-field"><label>岗位职责（每行一项，序号自动排列，可修改）</label><textarea id="js_r_duties" style="min-height:120px">${(r.duties||[]).map(d=>escapeHtml(d)).join('\\n')}</textarea></div>
+      <div class="ai-field"><label>岗位要求（每行一项，序号自动排列，可修改）</label><textarea id="js_r_requirements" style="min-height:120px">${(r.requirements||[]).map(x=>escapeHtml(x)).join('\\n')}</textarea></div>
+      <div class="ai-field"><label>合规提示</label><textarea id="js_r_compliance">${escapeHtml(r.complianceNotes||'')}</textarea></div>
+      <div class="ai-muted" style="margin:8px 0">胜任力模型（精通→了解，由主到次）：</div>
+      ${(r.competencies||[]).map(c=>`<div style="margin:6px 0"><b>${escapeHtml(c.category||'')}</b>：${(c.items||[]).map(i=>'['+escapeHtml(i.involve||'')+'] '+escapeHtml(i.name||'')+'：'+escapeHtml(i.desc||'')).join('；')}</div>`).join('')}
+    </div>`;
+  }
+  html += `</div>`;
   html += `<div class="ai-card"><h3>已保存岗位标准（${jobs.length}）</h3>${jobs.length?jobs.map(j=>`<div class="ai-list-item"><div><b>${escapeHtml(j.position)}</b> <span class="meta">${escapeHtml(j.dept||'')} · ${escapeHtml(j.level||'')}</span></div><div><button class="btn btn-outline btn-xs" onclick="loadJob('${j.id}')">载入</button> <button class="btn btn-danger btn-xs" onclick="delJob('${j.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">暂无，生成后点“保存岗位标准”。</div>'}</div>`;
   document.getElementById('aiSubContent').innerHTML = html;
 }
@@ -3110,38 +3126,38 @@ async function aiJobJD() {
     position: val('js_position'), dept: val('js_dept'), level: val('js_level'),
     responsibilities: val('js_resp'), requirements: val('js_req')
   }, btn);
-  if (r) { recruitAIState.jobResult = r; renderJobSpec(); showToast('JD 已生成'); }
-}
-
-async function aiJobComp() {
-  const btn = document.getElementById('btnJsComp');
-  const r = await aiGen('/api/ai/competency', {
-    position: val('js_position'), dept: val('js_dept'), level: val('js_level'), responsibilities: val('js_resp')
-  }, btn);
-  if (r) { recruitAIState.competencyResult = r; renderJobSpec(); showToast('胜任力已拆解'); }
+  if (r) { recruitAIState.jobResult = r; renderJobSpec(); showToast('岗位简章已生成'); }
 }
 
 async function saveJobSpec() {
-  const position = val('js_position');
-  if (!position) { showToast('请填写岗位名称'); return; }
+  const position = val('js_r_position') || val('js_position') || (recruitAIState.jobResult && recruitAIState.jobResult.position);
+  if (!position) { showToast('请填写岗位名称或先生成'); return; }
+  const duties = (val('js_r_duties')||'').split('\\n').map(s=>s.trim()).filter(Boolean);
+  const requirements = (val('js_r_requirements')||'').split('\\n').map(s=>s.trim()).filter(Boolean);
   const body = {
-    position, dept: val('js_dept'), level: val('js_level'),
+    position: val('js_r_position')||position,
+    dept: val('js_r_dept')||val('js_dept'),
+    level: val('js_r_level')||val('js_level'),
     responsibilities: val('js_resp'), requirements: val('js_req'),
-    jd: recruitAIState.jobResult?.jd || '',
-    competencies: recruitAIState.competencyResult?.dimensions || []
+    duties, requirementsList: requirements,
+    competencies: recruitAIState.jobResult?.competencies || [],
+    complianceNotes: val('js_r_compliance')||''
   };
   await apiPost('/api/jobSpecs', body);
-  recruitAIState.jobResult = null; recruitAIState.competencyResult = null;
+  recruitAIState.jobResult = null;
   showToast('岗位标准已保存'); renderJobSpec();
 }
 
 async function loadJob(id) {
   const j = recruitAIState.jobs.find(x => x.id === id);
   if (!j) return;
-  setVal('js_position', j.position); setVal('js_dept', j.dept||''); setVal('js_level', j.level||'');
+  setVal('js_position', j.position||''); setVal('js_dept', j.dept||''); setVal('js_level', j.level||'');
   setVal('js_resp', j.responsibilities||''); setVal('js_req', j.requirements||'');
-  recruitAIState.jobResult = j.jd ? { jd: j.jd, complianceNotes:'', duties:[] } : null;
-  recruitAIState.competencyResult = j.competencies ? { dimensions: j.competencies } : null;
+  recruitAIState.jobResult = {
+    position: j.position, dept: j.dept, level: j.level,
+    duties: j.duties || [], requirements: j.requirementsList || [],
+    competencies: j.competencies || [], complianceNotes: j.complianceNotes || ''
+  };
   showToast('已载入：'+j.position); renderJobSpec();
 }
 
@@ -3154,104 +3170,129 @@ async function delJob(id) {
 async function renderResumeParse() {
   const jobs = await apiGet('/api/jobSpecs').catch(() => []);
   recruitAIState.jobs = jobs;
-  const cand = await apiGet('/api/candidates').catch(()=>[]);
-  recruitAIState.candidates = cand;
-  const r = recruitAIState.resumeResult;
+  const cands = await apiGet('/api/candidates').catch(()=>[]);
+  recruitAIState.candidates = cands;
+  const batch = recruitAIState.batch;
   let html = `<div class="ai-card">
-    <h3>简历智能识别 → 人才登记表自动回填</h3>
-    <div class="ai-field"><label>粘贴简历文本（支持 PDF/Word 复制文字）</label><textarea id="rs_text" placeholder="将简历全文粘贴到这里…"></textarea></div>
-    <div class="ai-row">
-      <div class="ai-field"><label>关联岗位标准（用于人岗匹配）</label><select id="rs_job">${jobs.map(j=>`<option value="${j.id}">${escapeHtml(j.position)}</option>`).join('')||'<option value="">（无岗位标准）</option>'}</select></div>
-    </div>
+    <h3>简历智能识别 → 人才登记表自动回填（支持批量）</h3>
+    <div class="ai-field"><label>批量上传简历（.txt / 多文件）</label><input type="file" id="rs_files" multiple accept=".txt" onchange="handleResumeFiles(this)"></div>
+    <div class="ai-field"><label>或粘贴单份简历文本</label><textarea id="rs_text" placeholder="将简历全文粘贴到这里…"></textarea></div>
+    <div class="ai-row"><div class="ai-field"><label>关联岗位标准（用于人岗匹配/面试题库）</label><select id="rs_job">${jobs.map(j=>`<option value="${j.id}">${escapeHtml(j.position)}</option>`).join('')||'<option value="">（无岗位标准）</option>'}</select></div></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn btn-primary" id="btnRsParse" onclick="aiParseResume()">AI 解析简历</button>
-      <button class="btn btn-primary" id="btnRsMatch" onclick="aiMatch()" ${jobs.length?'':'disabled'}>AI 人岗匹配</button>
-      <button class="btn btn-primary" id="btnRsAnom" onclick="aiAnomaly()">AI 异常校验</button>
-      <button class="btn btn-outline" onclick="saveCandidate()">保存为候选人</button>
+      <button class="btn btn-primary" onclick="addPastedResume()">添加粘贴简历</button>
+      <button class="btn btn-primary" id="btnRsParse" onclick="aiParseAll()">一键解析全部</button>
+      <button class="btn btn-primary" id="btnRsMatch" onclick="aiMatchAll()" ${jobs.length?'':'disabled'}>一键人岗匹配</button>
+      <button class="btn btn-primary" id="btnRsAnom" onclick="aiAnomalyAll()">一键异常校验</button>
+      <button class="btn btn-outline" onclick="saveAllCandidates()">一键保存所有结果</button>
     </div>
-    ${r ? renderRegistry(r) : ''}
-    ${recruitAIState.matchResult ? `<div class="ai-result"><b>匹配度：${recruitAIState.matchResult.score} 分</b>\n${recruitAIState.matchResult.summary||''}\n\n<b>匹配项：</b>\n${(recruitAIState.matchResult.matched||[]).map(x=>'· '+x).join('\n')}\n<b>短板：</b>\n${(recruitAIState.matchResult.gaps||[]).map(x=>'· '+x).join('\n')}</div>` : ''}
-    ${recruitAIState.anomalyResult ? `<div class="ai-result"><b>异常校验：</b>\n${(recruitAIState.anomalyResult.issues||[]).map(i=>'[${i.severity}] '+i.type+'：'+i.desc).join('\n')||'未发现明显异常'}</div>` : ''}
+    ${batch.length?batch.map((item,i)=>renderResumeCard(item,i)).join(''):'<div class="ai-muted" style="margin-top:10px">上传或粘贴简历后，点“一键解析全部”开始。</div>'}
   </div>`;
-  html += `<div class="ai-card"><h3>候选人库（${cand.length}）</h3>${cand.length?cand.map(c=>`<div class="ai-list-item"><div><b>${escapeHtml(c.name||'未命名')}</b> <span class="meta">${escapeHtml((c.position||''))} · 匹配 ${c.matchScore||'-'} 分</span></div><div><button class="btn btn-outline btn-xs" onclick="delCandidate('${c.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">解析并保存后显示在这里。</div>'}</div>`;
+  html += `<div class="ai-card"><h3>候选人库（${cands.length}）</h3>${cands.length?cands.map(c=>`<div class="ai-list-item"><div><b>${escapeHtml(c.name||'未命名')}</b> <span class="meta">${escapeHtml(c.position||'')} · 匹配 ${c.matchScore||'-'} 分</span></div><div><button class="btn btn-outline btn-xs" onclick="delCandidate('${c.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">解析并保存后显示在这里。</div>'}</div>`;
   document.getElementById('aiSubContent').innerHTML = html;
 }
 
-function renderRegistry(r) {
-  const b = r.basic || {};
-  let h = `<div class="ai-result"><b>人才登记表（可编辑，保存后入库）</b><div class="ai-row">`;
-  h += fld('姓名','reg_name', b.name) + fld('性别','reg_gender', b.gender) + fld('出生年月','reg_birth', b.birthDate) + fld('年龄','reg_age', b.age);
-  h += `</div><div class="ai-row">`;
-  h += fld('现居地','reg_loc', b.location) + fld('婚育','reg_marital', b.maritalStatus) + fld('电话','reg_phone', b.phone) + fld('当前薪资','reg_cs', b.currentSalary) + fld('期望薪资','reg_es', b.expectedSalary);
-  h += `</div>`;
-  h += `<div class="ai-muted" style="margin:8px 0">教育背景：</div>` + (r.education||[]).map((e,i)=>`<div class="ai-row">${fld('学校','reg_edu_sch_'+i,e.school)}${fld('专业','reg_edu_maj_'+i,e.major)}${fld('学历','reg_edu_deg_'+i,e.degree)}${fld('毕业时间','reg_edu_grd_'+i,e.gradDate)}</div>`).join('');
-  h += `<div class="ai-muted" style="margin:8px 0">工作经历：</div>` + (r.work||[]).map((w,i)=>`<div class="ai-row">${fld('公司','reg_wk_co_'+i,w.company)}${fld('职位','reg_wk_pos_'+i,w.position)}${fld('起','reg_wk_s_'+i,w.startDate)}${fld('止','reg_wk_e_'+i,w.endDate)}${fld('离职原因','reg_wk_lr_'+i,w.leaveReason)}</div>`).join('');
-  h += `<div class="ai-muted" style="margin:8px 0">技能：${(r.skills||[]).join('、')||'—'} ｜ 证书：${(r.certificates||[]).join('、')||'—'}</div>`;
+function renderResumeCard(item, i) {
+  const b = item.parsed?.basic || {};
+  let h = `<div class="ai-card ai-batch-card"><h3>简历 ${i+1}：${escapeHtml(item.fileName||'粘贴')}</h3>`;
+  h += `<div class="ai-row">` + fld('姓名','rb_'+i+'_name', b.name) + fld('性别','rb_'+i+'_gender', b.gender) + fld('年龄','rb_'+i+'_age', b.age) + `</div>`;
+  h += `<div class="ai-row">` + fld('婚育情况','rb_'+i+'_marital', b.maritalStatus) + fld('应聘岗位','rb_'+i+'_apply', b.applyPosition) + fld('现居地','rb_'+i+'_cur', b.currentLocation) + fld('期望工作地','rb_'+i+'_exp', b.expectedLocation) + `</div>`;
+  h += `<div class="ai-row">` + fld('电话','rb_'+i+'_phone', b.phone) + fld('当前薪资','rb_'+i+'_cs', b.currentSalary) + fld('期望薪资','rb_'+i+'_es', b.expectedSalary) + `</div>`;
+  h += `<div class="ai-muted" style="margin:6px 0">教育信息：</div><div>${(item.parsed?.education||[]).map(e=>escapeHtml([e.school,e.major,e.degree,e.gradDate].filter(Boolean).join(' / '))).join('<br>')||'—'}</div>`;
+  h += `<div class="ai-muted" style="margin:6px 0">工作经历：</div><div>${(item.parsed?.work||[]).map(w=>escapeHtml([w.company,w.position,w.startDate+'~'+w.endDate].filter(Boolean).join(' · '))).join('<br>')||'—'}</div>`;
+  h += `<div class="ai-muted" style="margin:6px 0">技能：${(item.parsed?.skills||[]).join('、')||'—'} ｜ 证书：${(item.parsed?.certificates||[]).join('、')||'—'}</div>`;
+  if (item.match) h += `<div class="ai-muted">匹配度：<b>${item.match.score}</b> 分 ｜ ${escapeHtml(item.match.summary||'')}</div>`;
+  if (item.anomaly) h += `<div class="ai-muted">异常：${(item.anomaly.issues||[]).map(x=>'['+x.severity+']'+x.type+'：'+x.desc).join('；')||'未发现明显异常'}</div>`;
   h += `</div>`;
   return h;
 }
-function fld(label, id, value) { return `<div class="ai-field"><label>${label}</label><input id="${id}" value="${escapeHtml(value||'')}"></div>`; }
 
-async function aiParseResume() {
-  const btn = document.getElementById('btnRsParse');
-  const text = val('rs_text');
-  if (!text.trim()) { showToast('请先粘贴简历文本'); return; }
-  const r = await aiGen('/api/ai/parse-resume', { text }, btn);
-  if (r) { recruitAIState.resumeResult = r; renderResumeParse(); showToast('简历已解析'); }
+function handleResumeFiles(input) {
+  const files = Array.from(input.files||[]);
+  files.forEach(f => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      recruitAIState.batch.push({ fileName: f.name, text: String(reader.result||''), parsed:null, match:null, anomaly:null });
+      renderResumeParse();
+    };
+    reader.readAsText(f);
+  });
+  input.value = '';
 }
 
-async function aiMatch() {
+async function addPastedResume() {
+  const text = val('rs_text');
+  if (!text.trim()) { showToast('请先粘贴简历文本'); return; }
+  recruitAIState.batch.push({ fileName: '粘贴简历', text, parsed:null, match:null, anomaly:null });
+  setVal('rs_text',''); renderResumeParse(); showToast('已加入待解析列表');
+}
+
+async function aiParseAll() {
+  if (!recruitAIState.batch.length) { showToast('请先上传或粘贴简历'); return; }
+  for (let i=0;i<recruitAIState.batch.length;i++) {
+    const item = recruitAIState.batch[i];
+    if (item.parsed) continue;
+    const r = await aiGen('/api/ai/parse-resume', { text: item.text }, null);
+    if (r) item.parsed = r;
+    renderResumeParse();
+  }
+  showToast('全部解析完成');
+}
+
+async function aiMatchAll() {
   const jobId = val('rs_job');
   const job = recruitAIState.jobs.find(j => j.id === jobId);
   if (!job) { showToast('请先选择关联岗位标准'); return; }
-  const btn = document.getElementById('btnRsMatch');
-  const r = await aiGen('/api/ai/match', { jobSpec: job, candidate: recruitAIState.resumeResult }, btn);
-  if (r) { recruitAIState.matchResult = r; renderResumeParse(); showToast('匹配完成：'+r.score+'分'); }
-}
-
-async function aiAnomaly() {
-  const btn = document.getElementById('btnRsAnom');
-  const text = val('rs_text');
-  if (!text.trim()) { showToast('请先粘贴简历文本'); return; }
-  const r = await aiGen('/api/ai/anomaly', { text }, btn);
-  if (r) { recruitAIState.anomalyResult = r; renderResumeParse(); showToast('异常校验完成'); }
-}
-
-async function saveCandidate() {
-  const r = recruitAIState.resumeResult;
-  if (!r) { showToast('请先 AI 解析简历'); return; }
-  const c = {
-    name: val('reg_name') || r.basic?.name || '未命名',
-    position: val('rs_job') ? (recruitAIState.jobs.find(j=>j.id===val('rs_job'))||{}).position : '',
-    parsed: {
-      basic: {
-        name: val('reg_name'), gender: val('reg_gender'), birthDate: val('reg_birth'), age: val('reg_age'),
-        location: val('reg_loc'), maritalStatus: val('reg_marital'), phone: val('reg_phone'),
-        currentSalary: val('reg_cs'), expectedSalary: val('reg_es')
-      },
-      education: collectRows('reg_edu_', ['school','major','degree','gradDate']),
-      work: collectRows('reg_wk_', ['company','position','startDate','endDate','leaveReason']),
-      skills: r.skills || [], certificates: r.certificates || []
-    },
-    matchScore: recruitAIState.matchResult?.score || null,
-    matchDetail: recruitAIState.matchResult || null,
-    anomalies: recruitAIState.anomalyResult || null,
-    tags: []
-  };
-  await apiPost('/api/candidates', c);
-  recruitAIState.resumeResult = null; recruitAIState.matchResult = null; recruitAIState.anomalyResult = null;
-  showToast('候选人已保存'); renderResumeParse();
-}
-
-function collectRows(prefix, fields) {
-  const rows = [];
-  for (let i = 0; i < 20; i++) {
-    const obj = {};
-    let has = false;
-    fields.forEach(f => { const v = val(prefix+f+'_'+i); obj[f] = v; if (v) has = true; });
-    if (has) rows.push(obj);
+  for (let i=0;i<recruitAIState.batch.length;i++) {
+    const item = recruitAIState.batch[i];
+    if (!item.parsed) continue;
+    const r = await aiGen('/api/ai/match', { jobSpec: job, candidate: item.parsed }, null);
+    if (r) item.match = r;
+    renderResumeParse();
   }
-  return rows;
+  showToast('匹配完成');
+}
+
+async function aiAnomalyAll() {
+  for (let i=0;i<recruitAIState.batch.length;i++) {
+    const item = recruitAIState.batch[i];
+    if (!item.text) continue;
+    const r = await aiGen('/api/ai/anomaly', { text: item.text }, null);
+    if (r) item.anomaly = r;
+    renderResumeParse();
+  }
+  showToast('异常校验完成');
+}
+
+async function saveAllCandidates() {
+  const jobId = val('rs_job');
+  const job = recruitAIState.jobs.find(j => j.id === jobId);
+  let saved = 0;
+  for (let i=0;i<recruitAIState.batch.length;i++) {
+    const item = recruitAIState.batch[i];
+    if (!item.parsed) continue;
+    const c = {
+      name: val('rb_'+i+'_name') || item.parsed.basic?.name || '未命名',
+      position: val('rb_'+i+'_apply') || (job?job.position:''),
+      parsed: {
+        basic: {
+          name: val('rb_'+i+'_name'), gender: val('rb_'+i+'_gender'), age: val('rb_'+i+'_age'),
+          maritalStatus: val('rb_'+i+'_marital'), applyPosition: val('rb_'+i+'_apply'),
+          currentLocation: val('rb_'+i+'_cur'), expectedLocation: val('rb_'+i+'_exp'),
+          phone: val('rb_'+i+'_phone'), currentSalary: val('rb_'+i+'_cs'), expectedSalary: val('rb_'+i+'_es')
+        },
+        education: item.parsed.education||[], work: item.parsed.work||[],
+        skills: item.parsed.skills||[], certificates: item.parsed.certificates||[]
+      },
+      matchScore: item.match?.score ?? null,
+      matchDetail: item.match || null,
+      anomalies: item.anomaly || null,
+      tags: []
+    };
+    await apiPost('/api/candidates', c);
+    saved++;
+  }
+  recruitAIState.batch = [];
+  showToast('已保存 '+saved+' 位候选人'); renderResumeParse();
 }
 
 async function delCandidate(id) {
@@ -3263,59 +3304,60 @@ async function delCandidate(id) {
 async function renderQuestions() {
   const jobs = await apiGet('/api/jobSpecs').catch(() => []);
   recruitAIState.jobs = jobs;
+  const cands = await apiGet('/api/candidates').catch(()=>[]);
+  recruitAIState.candidates = cands;
   const qb = await apiGet('/api/questionBanks').catch(()=>[]);
   recruitAIState.qb = qb;
   const r = recruitAIState.questionsResult;
   let html = `<div class="ai-card">
-    <h3>AI 面试题本 + 评分表生成</h3>
+    <h3>专属面试题库生成（选候选人 + 岗位标准）</h3>
     <div class="ai-row">
+      <div class="ai-field"><label>候选人</label><select id="qb_cand">${cands.map(c=>`<option value="${c.id}">${escapeHtml(c.name||'未命名')}（${escapeHtml(c.position||'')}）</option>`).join('')||'<option value="">（无候选人）</option>'}</select></div>
       <div class="ai-field"><label>关联岗位标准</label><select id="qb_job">${jobs.map(j=>`<option value="${j.id}">${escapeHtml(j.position)}</option>`).join('')||'<option value="">（无）</option>'}</select></div>
-      <div class="ai-field"><label>面试时长</label><select id="qb_dur"><option value="30">30 分钟</option><option value="45" selected>45 分钟</option><option value="60">60 分钟</option></select></div>
     </div>
-    <div class="ai-field"><label>候选人背景（用于针对性追问）</label><textarea id="qb_bg" placeholder="简述候选人简历亮点、疑点…"></textarea></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn btn-primary" id="btnQb" onclick="aiQuestions()">AI 生成题本</button>
+      <button class="btn btn-primary" id="btnQb" onclick="aiQuestions()">AI 生成专属题本</button>
       <button class="btn btn-outline" onclick="saveQuestionBank()">保存题本</button>
     </div>
     ${r ? renderQuestionsList(r) : ''}
   </div>`;
-  html += `<div class="ai-card"><h3>已保存题本（${qb.length}）</h3>${qb.length?qb.map(q=>`<div class="ai-list-item"><div><b>${escapeHtml(q.position||'题本')}</b> <span class="meta">${q.durationMin||45}分钟 · ${escapeHtml((q.title||''))}</span></div><div><button class="btn btn-danger btn-xs" onclick="delQb('${q.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">生成后保存。</div>'}</div>`;
+  html += `<div class="ai-card"><h3>已保存题本（${qb.length}）</h3>${qb.length?qb.map(q=>`<div class="ai-list-item"><div><b>${escapeHtml(q.title||'题本')}</b> <span class="meta">${escapeHtml(q.candidateName||'')} · ${escapeHtml(q.position||'')}</span></div><div><button class="btn btn-danger btn-xs" onclick="delQb('${q.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">生成后保存。</div>'}</div>`;
   document.getElementById('aiSubContent').innerHTML = html;
 }
 
 function renderQuestionsList(r) {
   let h = `<div class="ai-result"><b>面试题本（${r.questions.length} 题）</b>`;
   h += r.questions.map(q=>`<div class="ai-q"><div class="cat">${escapeHtml(q.category||'')}</div><div class="q">${escapeHtml(q.question||'')}</div><div class="sub">考察要点：${escapeHtml(q.points||'')}<br>评分标准（0-10）：${escapeHtml(q.scoreStd||'')}<br>追问：${escapeHtml(q.followUp||'')}</div></div>`).join('');
-  if (r.scoreTable && r.scoreTable.length) {
-    h += `\n\n<b>评分维度权重：</b>\n` + r.scoreTable.map(s=>`· ${s.dimension}：${s.weight}`).join('\n');
-  }
   h += `</div>`;
   return h;
 }
 
 async function aiQuestions() {
-  const btn = document.getElementById('btnQb');
+  const candId = val('qb_cand');
   const jobId = val('qb_job');
+  const cand = recruitAIState.candidates.find(c => c.id === candId);
   const job = recruitAIState.jobs.find(j => j.id === jobId);
+  if (!cand || !job) { showToast('请选择候选人和岗位标准'); return; }
   const r = await aiGen('/api/ai/questions', {
-    position: job?.position || val('qb_job'),
-    competencies: job?.competencies || {},
-    candidateBackground: val('qb_bg'),
-    durationMin: parseInt(val('qb_dur')) || 45
-  }, btn);
-  if (r) { recruitAIState.questionsResult = r; renderQuestions(); showToast('题本已生成'); }
+    position: job.position,
+    competencies: job.competencies || {},
+    candidateBackground: JSON.stringify(cand.parsed||{}),
+    resumeText: JSON.stringify(cand.parsed||{})
+  }, document.getElementById('btnQb'));
+  if (r) { recruitAIState.questionsResult = r; recruitAIState._qbCand = cand; recruitAIState._qbJob = job; renderQuestions(); showToast('题本已生成'); }
 }
 
 async function saveQuestionBank() {
   const r = recruitAIState.questionsResult;
-  if (!r) { showToast('请先生成题本'); return; }
-  const jobId = val('qb_job');
-  const job = recruitAIState.jobs.find(j => j.id === jobId);
+  const cand = recruitAIState._qbCand, job = recruitAIState._qbJob;
+  if (!r || !cand || !job) { showToast('请先生成题本'); return; }
+  const title = cand.name + job.position + today();
   await apiPost('/api/questionBanks', {
-    position: job?.position || '', jobSpecId: jobId, durationMin: parseInt(val('qb_dur'))||45,
-    title: (job?.position||'')+' 面试题本', questions: r.questions, scoreTable: r.scoreTable || []
+    candidateId: cand.id, candidateName: cand.name,
+    position: job.position, jobSpecId: job.id,
+    title, questions: r.questions, scoreTable: r.scoreTable || []
   });
-  recruitAIState.questionsResult = null; showToast('题本已保存'); renderQuestions();
+  recruitAIState.questionsResult = null; showToast('题本已保存：'+title); renderQuestions();
 }
 
 async function delQb(id) { if (!confirm('确认删除？')) return; await apiDelete('/api/questionBanks/'+id); showToast('已删除'); renderQuestions(); }
@@ -3335,20 +3377,19 @@ async function renderDecision() {
       <button class="btn btn-primary" id="btnDc" onclick="aiDecision()">AI 生成综合评估报告</button>
       <button class="btn btn-outline" onclick="saveDecision()">保存决策</button>
     </div>
-    ${r ? `<div class="ai-result"><b>建议：${escapeHtml(r.recommendation||'')}</b>\n${escapeHtml(r.summary||'')}\n\n<b>优势：</b>\n${(r.strengths||[]).map(x=>'· '+x).join('\n')}\n<b>风险：</b>\n${(r.risks||[]).map(x=>'· '+x).join('\n')}\n<b>薪酬建议：</b>${escapeHtml(r.salarySuggestion?.range||'')}（${escapeHtml(r.salarySuggestion?.notes||'')}）</div>` : ''}
+    ${r ? `<div class="ai-result"><b>建议：${escapeHtml(r.recommendation||'')}</b>\\n${escapeHtml(r.summary||'')}\\n\\n<b>优势：</b>\\n${(r.strengths||[]).map(x=>'· '+x).join('\\n')}\\n<b>风险：</b>\\n${(r.risks||[]).map(x=>'· '+x).join('\\n')}\\n<b>薪酬建议：</b>${escapeHtml(r.salarySuggestion?.range||'')}（${escapeHtml(r.salarySuggestion?.notes||'')}）</div>` : ''}
   </div>`;
-  html += `<div class="ai-card"><h3>已保存决策（${dec.length}）</h3>${dec.length?dec.map(d=>`<div class="ai-list-item"><div><b>${escapeHtml(d.candidateName||'候选人')}</b> <span class="meta">${escapeHtml(d.recommendation||'')}</span></div><div><button class="btn btn-danger btn-xs" onclick="delDecision('${d.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">生成后保存。</div>'}</div>`;
+  html += `<div class="ai-card"><h3>已保存决策（${dec.length}）</h3>${dec.length?dec.map(d=>`<div class="ai-list-item"><div><b>${escapeHtml(d.candidateName||'候选人')}</b> <span class="meta">${escapeHtml(d.position||'')} · ${escapeHtml(d.createdAt||'')} · ${escapeHtml(d.recommendation||'')}</span></div><div><button class="btn btn-danger btn-xs" onclick="delDecision('${d.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">生成后保存。</div>'}</div>`;
   document.getElementById('aiSubContent').innerHTML = html;
 }
 
 async function aiDecision() {
-  const btn = document.getElementById('btnDc');
   const candId = val('dc_cand');
   const cand = recruitAIState.candidates.find(c => c.id === candId);
   if (!cand) { showToast('请选择候选人'); return; }
   const r = await aiGen('/api/ai/decision', {
     candidate: cand, matchResult: cand.matchDetail, interviewScores: val('dc_scores')
-  }, btn);
+  }, document.getElementById('btnDc'));
   if (r) { recruitAIState.decisionResult = r; renderDecision(); showToast('报告已生成'); }
 }
 
@@ -3359,6 +3400,7 @@ async function saveDecision() {
   if (!r || !cand) { showToast('请先生成报告'); return; }
   await apiPost('/api/hiringDecisions', {
     candidateId: candId, candidateName: cand.name,
+    position: cand.position || cand.parsed?.basic?.applyPosition || '',
     recommendation: r.recommendation, summary: r.summary,
     strengths: r.strengths || [], risks: r.risks || [],
     salarySuggestion: r.salarySuggestion || {}, createdAt: today()
@@ -3372,43 +3414,50 @@ async function delDecision(id) { if (!confirm('确认删除？')) return; await 
 async function renderProbation() {
   const jobs = await apiGet('/api/jobSpecs').catch(() => []);
   recruitAIState.jobs = jobs;
+  const cands = await apiGet('/api/candidates').catch(()=>[]);
+  recruitAIState.candidates = cands;
   const pb = await apiGet('/api/probations').catch(()=>[]);
   recruitAIState.probations = pb;
   const r = recruitAIState.probationResult;
   let html = `<div class="ai-card">
-    <h3>试用期考察与招聘效果闭环</h3>
+    <h3>试用期考察与招聘效果闭环（按候选人个性化）</h3>
     <div class="ai-row">
+      <div class="ai-field"><label>候选人</label><select id="pb_cand">${cands.map(c=>`<option value="${c.id}">${escapeHtml(c.name||'未命名')}（${escapeHtml(c.position||'')}）</option>`).join('')||'<option value="">（无候选人）</option>'}</select></div>
       <div class="ai-field"><label>关联岗位标准</label><select id="pb_job">${jobs.map(j=>`<option value="${j.id}">${escapeHtml(j.position)}</option>`).join('')||'<option value="">（无）</option>'}</select></div>
-      <div class="ai-field"><label>试用期（月）</label><select id="pb_mon"><option>3</option><option>6</option></select></div>
     </div>
+    <div class="ai-field"><label>面试结果反馈（可选，如：专业能力突出、沟通待提升）</label><textarea id="pb_fb" placeholder="填写面试评语/反馈…"></textarea></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn btn-primary" id="btnPb" onclick="aiProbation()">AI 拆解试用期目标</button>
+      <button class="btn btn-primary" id="btnPb" onclick="aiProbation()">AI 生成个性化试用期目标</button>
       <button class="btn btn-outline" onclick="saveProbation()">保存方案</button>
     </div>
-    ${r ? `<div class="ai-result"><b>阶段目标：</b>\n${(r.goals||[]).map(g=>'【'+g.phase+'】'+g.objective+'（KPI：'+g.kpi+'）').join('\n')}\n\n<b>评估要点：</b>${escapeHtml(r.evalTemplate||'')}\n\n<b>决策建议：</b>${escapeHtml(r.decisionAdvice||'')}</div>` : ''}
+    ${r ? `<div class="ai-result"><b>阶段目标：</b>\\n${(r.goals||[]).map(g=>'【'+g.phase+'】'+g.objective+'（KPI：'+g.kpi+'）\\n评估要点：'+(g.evalPoints||'')).join('\\n')}\\n\\n<b>评估要点说明：</b>${escapeHtml(r.evalTemplate||'')}\\n\\n<b>决策建议：</b>${escapeHtml(r.decisionAdvice||'')}</div>` : ''}
   </div>`;
-  html += `<div class="ai-card"><h3>已保存试用期方案（${pb.length}）</h3>${pb.length?pb.map(p=>`<div class="ai-list-item"><div><b>${escapeHtml(p.position||'方案')}</b> <span class="meta">${p.durationMonths||3}个月</span></div><div><button class="btn btn-danger btn-xs" onclick="delProbation('${p.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">生成后保存。</div>'}</div>`;
+  html += `<div class="ai-card"><h3>已保存试用期方案（${pb.length}）</h3>${pb.length?pb.map(p=>`<div class="ai-list-item"><div><b>${escapeHtml(p.candidateName||p.position||'方案')}</b> <span class="meta">${escapeHtml(p.position||'')} · ${escapeHtml(p.createdAt||'')}</span></div><div><button class="btn btn-danger btn-xs" onclick="delProbation('${p.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">生成后保存。</div>'}</div>`;
   document.getElementById('aiSubContent').innerHTML = html;
 }
 
 async function aiProbation() {
-  const btn = document.getElementById('btnPb');
+  const candId = val('pb_cand');
   const jobId = val('pb_job');
+  const cand = recruitAIState.candidates.find(c => c.id === candId);
   const job = recruitAIState.jobs.find(j => j.id === jobId);
+  if (!cand || !job) { showToast('请选择候选人和岗位标准'); return; }
   const r = await aiGen('/api/ai/probation', {
-    position: job?.position, competencies: job?.competencies || {}, durationMonths: parseInt(val('pb_mon'))||3
-  }, btn);
-  if (r) { recruitAIState.probationResult = r; renderProbation(); showToast('目标已拆解'); }
+    position: job.position, competencies: job.competencies || {},
+    candidateResume: cand.parsed || {}, interviewFeedback: val('pb_fb')
+  }, document.getElementById('btnPb'));
+  if (r) { recruitAIState.probationResult = r; recruitAIState._pbCand = cand; recruitAIState._pbJob = job; renderProbation(); showToast('目标已拆解'); }
 }
 
 async function saveProbation() {
   const r = recruitAIState.probationResult;
-  const jobId = val('pb_job');
-  const job = recruitAIState.jobs.find(j => j.id === jobId);
+  const cand = recruitAIState._pbCand, job = recruitAIState._pbJob;
   if (!r) { showToast('请先生成目标'); return; }
   await apiPost('/api/probations', {
-    position: job?.position || '', jobSpecId: jobId, durationMonths: parseInt(val('pb_mon'))||3,
-    goals: r.goals || [], evalTemplate: r.evalTemplate || '', decisionAdvice: r.decisionAdvice || ''
+    candidateId: cand?.id || null, candidateName: cand?.name || '',
+    position: job?.position || '', jobSpecId: job?.id || null,
+    goals: r.goals || [], evalTemplate: r.evalTemplate || '', decisionAdvice: r.decisionAdvice || '',
+    createdAt: today()
   });
   recruitAIState.probationResult = null; showToast('方案已保存'); renderProbation();
 }
@@ -3419,6 +3468,9 @@ async function delProbation(id) { if (!confirm('确认删除？')) return; await
 async function renderTalentPool() {
   const cands = await apiGet('/api/candidates').catch(()=>[]);
   recruitAIState.candidates = cands;
+  const decs = await apiGet('/api/hiringDecisions').catch(()=>[]);
+  const decMap = {};
+  decs.forEach(d => { if (d.candidateId) decMap[d.candidateId] = d; });
   const total = cands.length;
   const scored = cands.filter(c => c.matchScore != null).map(c => c.matchScore);
   const avg = scored.length ? Math.round(scored.reduce((a,b)=>a+b,0)/scored.length) : '-';
@@ -3429,29 +3481,26 @@ async function renderTalentPool() {
       <div class="ai-field"><label>平均匹配度</label><div style="font-size:24px;font-weight:700;color:var(--primary)">${avg}${avg!=='-'?' 分':''}</div></div>
       <div class="ai-field"><label>高匹配(≥80)</label><div style="font-size:24px;font-weight:700;color:var(--primary)">${hi}</div></div>
     </div>
-    <div class="ai-muted">说明：人岗匹配打分需在「简历解析回填」中执行 AI 人岗匹配后保存。</div>
   </div>`;
-  html += `<div class="ai-card"><h3>人才库（点击标签可标记，数据存于候选人记录）</h3>${total?cands.map(c=>{
-    const tags = c.tags||[];
-    return `<div class="ai-list-item"><div><b>${escapeHtml(c.name||'未命名')}</b> <span class="meta">${escapeHtml(c.position||'')} · 匹配 ${c.matchScore||'-'} 分</span><br>${(tags.length?tags.map(t=>`<span class="ai-pill">${escapeHtml(t)}</span>`).join(''):'<span class="ai-muted">无标签</span>')}</div><div><button class="btn btn-outline btn-xs" onclick="editTags('${c.id}')">打标签</button></div></div>`;
-  }).join(''):'<div class="ai-muted">暂无候选人。</div>'}</div>`;
+  html += `<div class="ai-card"><h3>人才库</h3>`;
+  if (total) {
+    html += `<table class="ai-table"><thead><tr><th>姓名</th><th>岗位名称</th><th>生成日期</th><th>匹配分数</th><th>录用建议</th><th>备注</th></tr></thead><tbody>`;
+    html += cands.map(c => {
+      const d = decMap[c.id];
+      return `<tr><td>${escapeHtml(c.name||'未命名')}</td><td>${escapeHtml(c.position||'')}</td><td>${escapeHtml(c.createdAt||'')}</td><td>${c.matchScore!=null?c.matchScore+'分':'-'}</td><td>${escapeHtml(d?d.recommendation:'—')}</td><td>${escapeHtml((c.tags||[]).join('、')||'—')}</td></tr>`;
+    }).join('');
+    html += `</tbody></table>`;
+  } else {
+    html += `<div class="ai-muted">暂无候选人。解析并保存后显示在这里。</div>`;
+  }
+  html += `</div>`;
   document.getElementById('aiSubContent').innerHTML = html;
 }
 
-async function editTags(id) {
-  const c = recruitAIState.candidates.find(x => x.id === id);
-  if (!c) return;
-  const input = prompt('输入标签（多个用逗号分隔）：', (c.tags||[]).join(','));
-  if (input === null) return;
-  const tags = input.split(/[,，]/).map(t=>t.trim()).filter(Boolean);
-  await apiPut('/api/candidates/'+id, { tags });
-  showToast('标签已更新'); renderTalentPool();
-}
-
 // 通用取值/赋值辅助
+function fld(label, id, value) { return `<div class="ai-field"><label>${label}</label><input id="${id}" value="${escapeHtml(value||'')}"></div>`; }
 function val(id) { const el = document.getElementById(id); return el ? el.value : ''; }
 function setVal(id, v) { const el = document.getElementById(id); if (el) el.value = v || ''; }
-
 </script>
 </body>
 </html>

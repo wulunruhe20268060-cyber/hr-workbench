@@ -1395,11 +1395,30 @@ app.get('/api/ai/diag', async (req, res) => {
   }
 });
 
-// 1. JD generation
+// 1. JD + 胜任力 一体化生成（岗位简章排版：名称/部门/层级 + 职责序号 + 要求序号；胜任力按精通→了解 由主到次）
 app.post('/api/ai/jd', authMiddleware, (req, res) => {
   const { position, dept, level, responsibilities, requirements } = req.body;
-  const system = '你是资深 HR 专家，擅长撰写规范、合规的岗位说明书（JD）。必须输出 JSON：{"jd":"...","complianceNotes":"...","duties":["...","..."]}。JD 用中文、条理清晰；合规提示要指出是否存在年龄/性别/地域等就业歧视风险并给出修改建议。';
-  const user = `岗位名称：${position||''}\n部门：${dept||''}\n层级：${level||''}\n核心职责：${responsibilities||''}\n任职要求：${requirements||''}\n请生成规范 JD、合规提示与核心职责列表。`;
+  const system = `你是资深 HR 专家，擅长撰写规范、合规的岗位说明书（JD）与胜任力模型。基于用户输入一次性生成结构化结果，必须只输出 JSON（不要任何额外说明文字）：
+{
+  "position":"岗位名称",
+  "dept":"所属部门",
+  "level":"岗位层级",
+  "duties":["岗位职责1","岗位职责2","..."],
+  "requirements":["任职要求1","任职要求2","..."],
+  "competencies":[
+    {"category":"精通","items":[{"name":"能力项","involve":"主要","desc":"说明"}]},
+    {"category":"熟练","items":[{"name":"能力项","involve":"负责","desc":"说明"}]},
+    {"category":"熟悉","items":[{"name":"能力项","involve":"协助","desc":"说明"}]},
+    {"category":"了解","items":[{"name":"能力项","involve":"参与","desc":"说明"}]}
+  ],
+  "complianceNotes":"合规风险提示与修改建议"
+}
+要求：
+1. duties 与 requirements 均为短语列表，按重要性由主到次排序。
+2. competencies 按掌握程度从"精通"到"了解"由主到次排列；每个能力项用 involve 标注责任强度（主要/负责/协助/参与）。如某层级无内容则给空数组。
+3. 如用户未提供部门或层级，依据岗位常识合理推断，不要留空。
+4. 合规提示须指出是否存在年龄/性别/地域等就业歧视措辞并给出修改建议。`;
+  const user = `岗位名称：${position||''}\n部门：${dept||''}\n层级：${level||''}\n核心职责：${responsibilities||''}\n任职要求：${requirements||''}\n请生成岗位简章（duties/requirements）与胜任力模型（competencies）。`;
   aiJson(res, system, user);
 });
 
@@ -1415,13 +1434,22 @@ app.post('/api/ai/competency', authMiddleware, (req, res) => {
 app.post('/api/ai/parse-resume', authMiddleware, (req, res) => {
   const { text } = req.body;
   if (!text || !text.trim()) return res.status(400).json({ error: '请粘贴简历文本' });
-  const system = `你是简历解析引擎。将简历文本解析为标准《人才登记表》结构化字段。输出 JSON：
-{"basic":{"name":"","gender":"","birthDate":"","age":null,"location":"","maritalStatus":"","phone":"","currentSalary":"","expectedSalary":""},
+  const system = `你是简历解析引擎。将简历文本解析为标准《人才登记表》结构化字段，必须只输出 JSON（不要额外说明）：
+{"basic":{"name":"","gender":"","age":null,"maritalStatus":"","applyPosition":"","currentLocation":"","expectedLocation":"","phone":"","currentSalary":"","expectedSalary":""},
 "education":[{"school":"","major":"","degree":"","gradDate":""}],
 "work":[{"company":"","position":"","startDate":"","endDate":"","leaveReason":""}],
-"projects":[{"name":"","role":"","desc":""}],
 "skills":["..."],
-"certificates":["..."]}`;
+"certificates":["..."]}
+解析规则：
+1. name：简历姓名。
+2. gender：有明示性别则填；无则根据姓名常见用字推断（伟/强/磊/杰/勇/峰多男，芳/丽/娟/婷/燕/敏多女），无把握则填空字符串。
+3. age：优先取简历直接年龄；无则据出生年月或毕业年份推算当前年龄；都没有则填 null。
+4. maritalStatus：据“已婚/未婚/已育”等字样填入，没有则填空。
+5. applyPosition：简历求职意向/应聘岗位；currentLocation：现居住地；expectedLocation：期望工作地。
+6. phone：从简历识别 11 位手机号填入，没有则填空。
+7. currentSalary / expectedSalary：据简历正文薪资描述填入（不要从文件名推断），没有则填空。
+8. education / work：按简历原文分段提取，时间倒序。
+9. skills / certificates：据简历据实提取。`;
   aiJson(res, system, '请解析以下简历：\n' + text);
 });
 
@@ -1443,11 +1471,21 @@ app.post('/api/ai/anomaly', authMiddleware, (req, res) => {
 
 // 6. Interview question bank generation
 app.post('/api/ai/questions', authMiddleware, (req, res) => {
-  const { position, competencies, candidateBackground, durationMin } = req.body;
-  const system = `你是面试命题专家。生成定制化面试题本。输出 JSON：
-{"questions":[{"category":"基础胜任力|专业能力|行为事件(STAR)|情景模拟|简历追问","question":"...","points":"考察要点","scoreStd":"0-10分评分标准","followUp":"参考追问话术"}],
-"scoreTable":[{"dimension":"...","weight":0-100}]}`;
-  const user = `岗位：${position||''}\n胜任力标准：${JSON.stringify(competencies||{})}\n候选人背景：${candidateBackground||''}\n面试时长：${durationMin||45}分钟。请生成对应题量与难度的题本及评分表。`;
+  const { position, competencies, candidateBackground, resumeText } = req.body;
+  const system = `你是面试命题专家。基于【岗位核心要求】与【候选人简历】生成专属题本，必须只输出 JSON（不要额外说明）：
+{"questions":[
+  {"category":"专业能力","question":"...","points":"考察要点","scoreStd":"0-10分评分标准","followUp":"参考追问"},
+  {"category":"专业能力","question":"...","points":"...","scoreStd":"...","followUp":"..."},
+  {"category":"专业能力","question":"...","points":"...","scoreStd":"...","followUp":"..."},
+  {"category":"行为事件","question":"...","points":"...","scoreStd":"...","followUp":"..."},
+  {"category":"行为事件","question":"...","points":"...","scoreStd":"...","followUp":"..."},
+  {"category":"情景模拟","question":"...","points":"...","scoreStd":"...","followUp":"..."},
+  {"category":"情景模拟","question":"...","points":"...","scoreStd":"...","followUp":"..."},
+  {"category":"简历追问","question":"...","points":"...","scoreStd":"...","followUp":"..."},
+  {"category":"简历追问","question":"...","points":"...","scoreStd":"...","followUp":"..."}
+]}
+题量要求：专业能力 3 题、行为事件 2 题（据简历项目经历命制）、情景模拟 2 题（据公司该岗位核心要求命制）、简历追问 2 题（针对简历疑点/空白），合计 9 题。每题含 question/points/scoreStd/followUp。`;
+  const user = `岗位：${position||''}\n胜任力标准：${JSON.stringify(competencies||{})}\n候选人简历背景：${candidateBackground||''}\n候选人简历原文：${resumeText||''}\n请按上述分类与题量生成专属题本。`;
   aiJson(res, system, user);
 });
 
@@ -1461,9 +1499,22 @@ app.post('/api/ai/decision', authMiddleware, (req, res) => {
 
 // 8. Probation plan
 app.post('/api/ai/probation', authMiddleware, (req, res) => {
-  const { position, competencies, durationMonths } = req.body;
-  const system = '你是试用期管理专家。基于岗位胜任力拆解试用期目标。输出 JSON：{"goals":[{"phase":"第1月|第2月|第3月|第4-6月","objective":"...","kpi":"可量化指标"}],"evalTemplate":"评估要点说明","decisionAdvice":"转正/延长/不转正判断逻辑"}。';
-  const user = `岗位：${position||''}\n胜任力：${JSON.stringify(competencies||{})}\n试用期：${durationMonths||3}个月。请拆解阶段目标。`;
+  const { position, competencies, candidateResume, interviewFeedback } = req.body;
+  const system = `你是试用期管理专家。基于【岗位胜任力】+【候选人简历】+【面试结果反馈】为该候选人生成个性化试用期考察目标，必须只输出 JSON（不要额外说明）：
+{"goals":[
+  {"phase":"第一周","objective":"...","kpi":"可量化指标","evalPoints":"评估要点"},
+  {"phase":"第二周","objective":"...","kpi":"...","evalPoints":"..."},
+  {"phase":"第一个月","objective":"...","kpi":"...","evalPoints":"..."},
+  {"phase":"第二个月","objective":"...","kpi":"...","evalPoints":"..."},
+  {"phase":"第三个月","objective":"...","kpi":"...","evalPoints":"..."}
+],
+"evalTemplate":"试用期评估要点与评分维度说明（含定量与定性）",
+"decisionAdvice":"结合优劣势的转正/延长/不转正的定量与定性判定逻辑"}
+要求：
+1. goals 必须包含 5 个阶段：第一周、第二周、第一个月、第二个月、第三个月。
+2. 目标须结合候选人简历优劣势与该岗位核心要求，体现个性化。
+3. evalPoints 与 decisionAdvice 须同时包含定量（可量化指标/分数）与定性（行为/能力描述）标准。`;
+  const user = `岗位：${position||''}\n岗位核心要求：${JSON.stringify(competencies||{})}\n候选人简历：${JSON.stringify(candidateResume||{})}\n面试结果反馈：${interviewFeedback||''}\n请生成个性化试用期目标。`;
   aiJson(res, system, user);
 });
 
