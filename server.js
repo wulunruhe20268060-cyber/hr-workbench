@@ -1298,17 +1298,18 @@ function migrateTemplates() {
 // are set; otherwise falls back to the free Doubao endpoint via DOUBAO_SESSIONID; otherwise
 // returns a friendly AI_NOT_CONFIGURED error (no crash).
 async function callAI(systemPrompt, userPrompt) {
-  const fallback = process.env.DOUBAO_SESSIONID ? (process.env.DOUBAO_BASE_URL || '') : '';
-  let base = process.env.AI_BASE_URL || fallback;
+  const fallback = (process.env.DOUBAO_SESSIONID || '').trim() ? (process.env.DOUBAO_BASE_URL || '') : '';
+  let base = (process.env.AI_BASE_URL || fallback).trim();
   if (!base) {
-    const err = new Error('AI 未配置：请设置 AI_BASE_URL/AI_API_KEY/AI_MODEL（推荐火山方舟：https://ark.cn-beijing.volces.com/api/v3/chat/completions）');
+    const err = new Error('AI 未配置：请设置 AI_BASE_URL/AI_API_KEY/AI_MODEL（推荐火山方舟：https://ark.cn-beijing.volces.com/api/v3）');
     err.code = 'AI_NOT_CONFIGURED';
     throw err;
   }
-  // 容错：允许只填到 /v1 或 /api/v3，自动补全 /chat/completions
-  if (!/\/chat\/completions\/?$/.test(base)) base = base.replace(/\/+$/, '') + '/chat/completions';
-  const apiKey = process.env.AI_API_KEY || process.env.DOUBAO_SESSIONID || '';
-  const model = process.env.AI_MODEL || (process.env.DOUBAO_SESSIONID ? 'doubao' : 'gpt-4o-mini');
+  // 容错：允许只填到 /v1 或 /api/v3，自动补全 /chat/completions；同时去掉粘贴时混入的换行/空格
+  base = base.replace(/[\s\/]+$/, '');
+  if (!base.endsWith('/chat/completions')) base = base + '/chat/completions';
+  const apiKey = (process.env.AI_API_KEY || process.env.DOUBAO_SESSIONID || '').trim();
+  const model = (process.env.AI_MODEL || '').trim() || (process.env.DOUBAO_SESSIONID ? 'doubao' : 'gpt-4o-mini');
   const body = {
     model,
     messages: [
