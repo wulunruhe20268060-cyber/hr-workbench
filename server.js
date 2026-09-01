@@ -1359,6 +1359,7 @@ async function aiJson(res, systemPrompt, userPrompt) {
     res.json(extractJson(text));
   } catch (e) {
     if (e.code === 'AI_NOT_CONFIGURED') return res.status(400).json({ error: e.message });
+    console.error('[AI/json]', e.message);
     res.status(500).json({ error: 'AI 调用失败：' + e.message });
   }
 }
@@ -1370,7 +1371,26 @@ app.post('/api/ai/chat', authMiddleware, async (req, res) => {
     res.json({ text });
   } catch (e) {
     if (e.code === 'AI_NOT_CONFIGURED') return res.status(400).json({ error: e.message });
+    console.error('[AI/chat]', e.message);
     res.status(500).json({ error: 'AI 调用失败：' + e.message });
+  }
+});
+
+// Diagnostic endpoint: tests AI provider without auth, returns detailed error (no secrets leaked)
+app.get('/api/ai/diag', async (req, res) => {
+  const cfg = {
+    AI_BASE_URL: process.env.AI_BASE_URL || '',
+    AI_API_KEY_PREFIX: (process.env.AI_API_KEY || '').slice(0, 12) + '...',
+    AI_MODEL: process.env.AI_MODEL || '',
+    DOUBAO_BASE_URL: process.env.DOUBAO_BASE_URL || '',
+    DOUBAO_SESSIONID_PREFIX: (process.env.DOUBAO_SESSIONID || '').slice(0, 12) + '...'
+  };
+  try {
+    const text = await callAI('You are a helpful assistant. Reply exactly one word: OK', 'Say OK');
+    res.json({ ok: true, config: cfg, response: text.slice(0, 200) });
+  } catch (e) {
+    console.error('[AI/diag]', e.message);
+    res.status(500).json({ ok: false, config: cfg, error: e.message });
   }
 });
 
