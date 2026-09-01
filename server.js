@@ -1343,7 +1343,9 @@ async function callAI(systemPrompt, userPrompt) {
 // Extract JSON from AI text (handles code fences / prose wrapping)
 function extractJson(text) {
   if (typeof text !== 'string') return text;
-  try { return JSON.parse(text.trim()); } catch (e) {}
+  // 去除 BOM 与零宽字符，避免 AI 输出偶发“乱码”
+  text = text.replace(/[﻿\uFEFF\u200B\u200C\u200D]/g, '').trim();
+  try { return JSON.parse(text); } catch (e) {}
   // strip code fences
   let t = text.replace(/```(?:json)?/gi, '').trim();
   try { return JSON.parse(t); } catch (e) {}
@@ -1414,7 +1416,7 @@ app.post('/api/ai/jd', authMiddleware, (req, res) => {
   "complianceNotes":"合规风险提示与修改建议"
 }
 要求：
-1. duties 与 requirements 均为短语列表，按重要性由主到次排序。
+1. duties 与 requirements 均为短语列表，每项为一句简洁短语，不要包含序号、项目符号、换行或乱码字符（序号由系统自动生成），按重要性由主到次排序。
 2. competencies 按掌握程度从"精通"到"了解"由主到次排列；每个能力项用 involve 标注责任强度（主要/负责/协助/参与）。如某层级无内容则给空数组。
 3. 如用户未提供部门或层级，依据岗位常识合理推断，不要留空。
 4. 合规提示须指出是否存在年龄/性别/地域等就业歧视措辞并给出修改建议。`;
@@ -1451,6 +1453,45 @@ app.post('/api/ai/parse-resume', authMiddleware, (req, res) => {
 8. education / work：按简历原文分段提取，时间倒序。
 9. skills / certificates：据简历据实提取。`;
   aiJson(res, system, '请解析以下简历：\n' + text);
+});
+
+// 3.1 简历文件文本提取（支持 txt/md/pdf/docx/jpg/png）
+app.post('/api/ai/extract-resume', authMiddleware, async (req, res) => {
+  try {
+    const { fileName, data, mime } = req.body || {};
+    if (!data) return res.status(400).json({ error: '未收到文件内容' });
+    const buf = Buffer.from(String(data), 'base64');
+    const lower = (fileName || '').toLowerCase();
+    const m = (mime || '').toLowerCase();
+    let text = '';
+    if (lower.endsWith('.pdf') || m.includes('pdf')) {
+      const pdfParse = require('pdf-parse');
+      const out = await pdfParse(buf);
+      text = out.text || '';
+    } else if (lower.endsWith('.docx') || m.includes('word') || m.includes('officedocument')) {
+      const mammoth = require('mammoth');
+      const out = await mammoth.extractRawText({ buffer: buf });
+      text = out.value || '';
+    } else if (lower.endsWith('.txt') || lower.endsWith('.md') || m.includes('text/plain') || m.includes('text/markdown')) {
+      text = buf.toString('utf8');
+    } else if (lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png') || m.includes('image/')) {
+      try {
+        const Tesseract = require('tesseract.js');
+        const result = await Tesseract.recognize(buf, 'chi_sim+eng', { logger: () => {} });
+        text = (result.data && result.data.text) || '';
+      } catch (e) {
+        return res.status(422).json({ error: '图片文字识别(OCR)失败：' + e.message + '。建议改用 PDF / Word 文档上传。' });
+      }
+    } else {
+      text = buf.toString('utf8');
+    }
+    text = text.replace(/\r\n/g, '\n').replace(/[ \t]+\n/g, '\n').trim();
+    if (!text) return res.status(422).json({ error: '未能从文件中提取到文本，请确认文件未加密或换用 PDF/Word。' });
+    res.json({ text });
+  } catch (e) {
+    console.error('[extract-resume]', e.message);
+    res.status(500).json({ error: '文件解析失败：' + e.message });
+  }
 });
 
 // 4. Candidate-job matching score

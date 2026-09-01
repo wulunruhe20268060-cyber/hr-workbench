@@ -3102,21 +3102,27 @@ async function renderJobSpec() {
       <button class="btn btn-outline" onclick="saveJobSpec()">保存岗位标准</button>
     </div>`;
   if (r) {
+    const dutiesHtml = (r.duties||[]).map(d=>`<li>${escapeHtml(d)}</li>`).join('');
+    const reqHtml = (r.requirements||[]).map(x=>`<li>${escapeHtml(x)}</li>`).join('');
+    const compHtml = (r.competencies||[]).map(c=>`<div style="margin:6px 0"><b>${escapeHtml(c.category||'')}</b>：${(c.items||[]).map(i=>'['+escapeHtml(i.involve||'')+'] '+escapeHtml(i.name||'')+'：'+escapeHtml(i.desc||'')).join('；')}</div>`).join('');
     html += `<div class="ai-result" style="white-space:normal">
       <div class="ai-row" style="margin-bottom:10px">
         <div class="ai-field"><label>岗位名称</label><input id="js_r_position" value="${escapeHtml(r.position||'')}"></div>
         <div class="ai-field"><label>所属部门</label><input id="js_r_dept" value="${escapeHtml(r.dept||'')}"></div>
         <div class="ai-field"><label>岗位层级</label><input id="js_r_level" value="${escapeHtml(r.level||'')}"></div>
       </div>
-      <div class="ai-field"><label>岗位职责（每行一项，序号自动排列，可修改）</label><textarea id="js_r_duties" style="min-height:120px">${(r.duties||[]).map(d=>escapeHtml(d)).join('\\n')}</textarea></div>
-      <div class="ai-field"><label>岗位要求（每行一项，序号自动排列，可修改）</label><textarea id="js_r_requirements" style="min-height:120px">${(r.requirements||[]).map(x=>escapeHtml(x)).join('\\n')}</textarea></div>
+      <div class="ai-field"><label>岗位职责（每行一项，保存后自动以 1.2.3. 编号展示）</label><textarea id="js_r_duties" style="min-height:120px">${(r.duties||[]).map(d=>escapeHtml(d)).join('\n')}</textarea></div>
+      <div class="ai-field"><label>岗位要求（每行一项，保存后自动以 1.2.3. 编号展示）</label><textarea id="js_r_requirements" style="min-height:120px">${(r.requirements||[]).map(x=>escapeHtml(x)).join('\n')}</textarea></div>
+      <div class="ai-muted" style="margin:6px 0">生成预览（序号自动排列，无乱码）：</div>
+      <div class="ai-row"><div class="ai-field" style="flex:1;min-width:240px"><label>岗位职责</label><ol style="margin:4px 0;padding-left:20px">${dutiesHtml||'<li>—</li>'}</ol></div>
+      <div class="ai-field" style="flex:1;min-width:240px"><label>岗位要求</label><ol style="margin:4px 0;padding-left:20px">${reqHtml||'<li>—</li>'}</ol></div></div>
       <div class="ai-field"><label>合规提示</label><textarea id="js_r_compliance">${escapeHtml(r.complianceNotes||'')}</textarea></div>
       <div class="ai-muted" style="margin:8px 0">胜任力模型（精通→了解，由主到次）：</div>
-      ${(r.competencies||[]).map(c=>`<div style="margin:6px 0"><b>${escapeHtml(c.category||'')}</b>：${(c.items||[]).map(i=>'['+escapeHtml(i.involve||'')+'] '+escapeHtml(i.name||'')+'：'+escapeHtml(i.desc||'')).join('；')}</div>`).join('')}
+      ${compHtml}
     </div>`;
   }
   html += `</div>`;
-  html += `<div class="ai-card"><h3>已保存岗位标准（${jobs.length}）</h3>${jobs.length?jobs.map(j=>`<div class="ai-list-item"><div><b>${escapeHtml(j.position)}</b> <span class="meta">${escapeHtml(j.dept||'')} · ${escapeHtml(j.level||'')}</span></div><div><button class="btn btn-outline btn-xs" onclick="loadJob('${j.id}')">载入</button> <button class="btn btn-danger btn-xs" onclick="delJob('${j.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">暂无，生成后点“保存岗位标准”。</div>'}</div>`;
+  html += `<div class="ai-card"><h3>已保存岗位标准（${jobs.length}）</h3>${jobs.length?jobs.map(j=>`<div class="ai-list-item"><div><b>${escapeHtml(j.position)}</b> <span class="meta">${escapeHtml(j.dept||'')} · ${escapeHtml(j.level||'')}</span></div><div><button class="btn btn-outline btn-xs" onclick="viewRecord('jobSpecs','${j.id}')">查看</button> <button class="btn btn-outline btn-xs" onclick="editRecord('jobSpecs','${j.id}')">编辑</button> <button class="btn btn-danger btn-xs" onclick="removeRecord('jobSpecs','${j.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">暂无，生成后点“保存岗位标准”。</div>'}</div>`;
   document.getElementById('aiSubContent').innerHTML = html;
 }
 
@@ -3132,8 +3138,8 @@ async function aiJobJD() {
 async function saveJobSpec() {
   const position = val('js_r_position') || val('js_position') || (recruitAIState.jobResult && recruitAIState.jobResult.position);
   if (!position) { showToast('请填写岗位名称或先生成'); return; }
-  const duties = (val('js_r_duties')||'').split('\\n').map(s=>s.trim()).filter(Boolean);
-  const requirements = (val('js_r_requirements')||'').split('\\n').map(s=>s.trim()).filter(Boolean);
+  const duties = (val('js_r_duties')||'').split('\n').map(s=>s.trim()).filter(Boolean);
+  const requirements = (val('js_r_requirements')||'').split('\n').map(s=>s.trim()).filter(Boolean);
   const body = {
     position: val('js_r_position')||position,
     dept: val('js_r_dept')||val('js_dept'),
@@ -3148,24 +3154,6 @@ async function saveJobSpec() {
   showToast('岗位标准已保存'); renderJobSpec();
 }
 
-async function loadJob(id) {
-  const j = recruitAIState.jobs.find(x => x.id === id);
-  if (!j) return;
-  setVal('js_position', j.position||''); setVal('js_dept', j.dept||''); setVal('js_level', j.level||'');
-  setVal('js_resp', j.responsibilities||''); setVal('js_req', j.requirements||'');
-  recruitAIState.jobResult = {
-    position: j.position, dept: j.dept, level: j.level,
-    duties: j.duties || [], requirements: j.requirementsList || [],
-    competencies: j.competencies || [], complianceNotes: j.complianceNotes || ''
-  };
-  showToast('已载入：'+j.position); renderJobSpec();
-}
-
-async function delJob(id) {
-  if (!confirm('确认删除该岗位标准？')) return;
-  await apiDelete('/api/jobSpecs/'+id); showToast('已删除'); renderJobSpec();
-}
-
 // ---------- 2. 简历解析回填 ----------
 async function renderResumeParse() {
   const jobs = await apiGet('/api/jobSpecs').catch(() => []);
@@ -3175,62 +3163,72 @@ async function renderResumeParse() {
   const batch = recruitAIState.batch;
   let html = `<div class="ai-card">
     <h3>简历智能识别 → 人才登记表自动回填（支持批量）</h3>
-    <div class="ai-field"><label>批量上传简历（.txt / 多文件）</label><input type="file" id="rs_files" multiple accept=".txt" onchange="handleResumeFiles(this)"></div>
-    <div class="ai-field"><label>或粘贴单份简历文本</label><textarea id="rs_text" placeholder="将简历全文粘贴到这里…"></textarea></div>
+    <div class="ai-field"><label>批量上传简历（支持 Word / PDF / JPG / PNG / TXT / MD）</label><input type="file" id="rs_files" multiple accept=".txt,.md,.pdf,.doc,.docx,.jpg,.jpeg,.png" onchange="handleResumeFiles(this)"></div>
     <div class="ai-row"><div class="ai-field"><label>关联岗位标准（用于人岗匹配/面试题库）</label><select id="rs_job">${jobs.map(j=>`<option value="${j.id}">${escapeHtml(j.position)}</option>`).join('')||'<option value="">（无岗位标准）</option>'}</select></div></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn btn-primary" onclick="addPastedResume()">添加粘贴简历</button>
       <button class="btn btn-primary" id="btnRsParse" onclick="aiParseAll()">一键解析全部</button>
       <button class="btn btn-primary" id="btnRsMatch" onclick="aiMatchAll()" ${jobs.length?'':'disabled'}>一键人岗匹配</button>
       <button class="btn btn-primary" id="btnRsAnom" onclick="aiAnomalyAll()">一键异常校验</button>
       <button class="btn btn-outline" onclick="saveAllCandidates()">一键保存所有结果</button>
     </div>
-    ${batch.length?batch.map((item,i)=>renderResumeCard(item,i)).join(''):'<div class="ai-muted" style="margin-top:10px">上传或粘贴简历后，点“一键解析全部”开始。</div>'}
+    ${batch.length?batch.map((item,i)=>renderResumeCard(item,i)).join(''):'<div class="ai-muted" style="margin-top:10px">上传简历后，点“一键解析全部”开始。</div>'}
   </div>`;
-  html += `<div class="ai-card"><h3>候选人库（${cands.length}）</h3>${cands.length?cands.map(c=>`<div class="ai-list-item"><div><b>${escapeHtml(c.name||'未命名')}</b> <span class="meta">${escapeHtml(c.position||'')} · 匹配 ${c.matchScore||'-'} 分</span></div><div><button class="btn btn-outline btn-xs" onclick="delCandidate('${c.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">解析并保存后显示在这里。</div>'}</div>`;
+  html += `<div class="ai-card"><h3>候选人库（${cands.length}）</h3>${cands.length?cands.map(c=>`<div class="ai-list-item"><div><b>${escapeHtml(c.name||'未命名')}</b> <span class="meta">${escapeHtml(c.position||'')} · 匹配 ${c.matchScore||'-'} 分</span></div><div><button class="btn btn-outline btn-xs" onclick="viewRecord('candidates','${c.id}')">查看</button> <button class="btn btn-outline btn-xs" onclick="editRecord('candidates','${c.id}')">编辑</button> <button class="btn btn-danger btn-xs" onclick="removeRecord('candidates','${c.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">解析并保存后显示在这里。</div>'}</div>`;
   document.getElementById('aiSubContent').innerHTML = html;
 }
 
 function renderResumeCard(item, i) {
+  if (item.extracting) return `<div class="ai-card ai-batch-card"><h3>简历 ${i+1}：${escapeHtml(item.fileName||'')}</h3><div class="ai-muted">文本提取中…（支持 PDF / Word / 图片 OCR）</div></div>`;
   const b = item.parsed?.basic || {};
-  let h = `<div class="ai-card ai-batch-card"><h3>简历 ${i+1}：${escapeHtml(item.fileName||'粘贴')}</h3>`;
+  let h = `<div class="ai-card ai-batch-card"><h3>简历 ${i+1}：${escapeHtml(item.fileName||'上传文件')}</h3>`;
   h += `<div class="ai-row">` + fld('姓名','rb_'+i+'_name', b.name) + fld('性别','rb_'+i+'_gender', b.gender) + fld('年龄','rb_'+i+'_age', b.age) + `</div>`;
   h += `<div class="ai-row">` + fld('婚育情况','rb_'+i+'_marital', b.maritalStatus) + fld('应聘岗位','rb_'+i+'_apply', b.applyPosition) + fld('现居地','rb_'+i+'_cur', b.currentLocation) + fld('期望工作地','rb_'+i+'_exp', b.expectedLocation) + `</div>`;
   h += `<div class="ai-row">` + fld('电话','rb_'+i+'_phone', b.phone) + fld('当前薪资','rb_'+i+'_cs', b.currentSalary) + fld('期望薪资','rb_'+i+'_es', b.expectedSalary) + `</div>`;
   h += `<div class="ai-muted" style="margin:6px 0">教育信息：</div><div>${(item.parsed?.education||[]).map(e=>escapeHtml([e.school,e.major,e.degree,e.gradDate].filter(Boolean).join(' / '))).join('<br>')||'—'}</div>`;
   h += `<div class="ai-muted" style="margin:6px 0">工作经历：</div><div>${(item.parsed?.work||[]).map(w=>escapeHtml([w.company,w.position,w.startDate+'~'+w.endDate].filter(Boolean).join(' · '))).join('<br>')||'—'}</div>`;
-  h += `<div class="ai-muted" style="margin:6px 0">技能：${(item.parsed?.skills||[]).join('、')||'—'} ｜ 证书：${(item.parsed?.certificates||[]).join('、')||'—'}</div>`;
+  h += `<div class="ai-muted" style="margin:6px 0">技能：${(item.parsed?.skills||[]).join('、')||'—'}</div>`;
+  h += `<div class="ai-muted" style="margin:6px 0">证书：${(item.parsed?.certificates||[]).join('、')||'—'}</div>`;
   if (item.match) h += `<div class="ai-muted">匹配度：<b>${item.match.score}</b> 分 ｜ ${escapeHtml(item.match.summary||'')}</div>`;
   if (item.anomaly) h += `<div class="ai-muted">异常：${(item.anomaly.issues||[]).map(x=>'['+x.severity+']'+x.type+'：'+x.desc).join('；')||'未发现明显异常'}</div>`;
   h += `</div>`;
   return h;
 }
 
-function handleResumeFiles(input) {
+async function handleResumeFiles(input) {
   const files = Array.from(input.files||[]);
-  files.forEach(f => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      recruitAIState.batch.push({ fileName: f.name, text: String(reader.result||''), parsed:null, match:null, anomaly:null });
+  for (const f of files) {
+    const item = { fileName: f.name, mime: f.type, text:'', parsed:null, match:null, anomaly:null, extracting:true };
+    recruitAIState.batch.push(item);
+    renderResumeParse();
+    try {
+      const base64 = await fileToBase64(f);
+      const r = await apiPost('/api/ai/extract-resume', { fileName: f.name, mime: f.type, data: base64 });
+      item.text = r.text || '';
+      if (!item.text) showToast('未能从「'+f.name+'」提取文本（可能加密或损坏）');
+    } catch (e) {
+      showToast('提取失败：'+(e.message||f.name));
+    } finally {
+      item.extracting = false;
       renderResumeParse();
-    };
-    reader.readAsText(f);
-  });
+    }
+  }
   input.value = '';
 }
 
-async function addPastedResume() {
-  const text = val('rs_text');
-  if (!text.trim()) { showToast('请先粘贴简历文本'); return; }
-  recruitAIState.batch.push({ fileName: '粘贴简历', text, parsed:null, match:null, anomaly:null });
-  setVal('rs_text',''); renderResumeParse(); showToast('已加入待解析列表');
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => { const res = String(fr.result||''); const c = res.indexOf(','); resolve(c>=0 ? res.slice(c+1) : res); };
+    fr.onerror = reject;
+    fr.readAsDataURL(file);
+  });
 }
 
 async function aiParseAll() {
-  if (!recruitAIState.batch.length) { showToast('请先上传或粘贴简历'); return; }
+  if (!recruitAIState.batch.length) { showToast('请先上传简历'); return; }
   for (let i=0;i<recruitAIState.batch.length;i++) {
     const item = recruitAIState.batch[i];
-    if (item.parsed) continue;
+    if (item.parsed || item.extracting || !item.text || !item.text.trim()) continue;
     const r = await aiGen('/api/ai/parse-resume', { text: item.text }, null);
     if (r) item.parsed = r;
     renderResumeParse();
@@ -3295,11 +3293,6 @@ async function saveAllCandidates() {
   showToast('已保存 '+saved+' 位候选人'); renderResumeParse();
 }
 
-async function delCandidate(id) {
-  if (!confirm('确认删除该候选人？')) return;
-  await apiDelete('/api/candidates/'+id); showToast('已删除'); renderResumeParse();
-}
-
 // ---------- 3. 面试题库 ----------
 async function renderQuestions() {
   const jobs = await apiGet('/api/jobSpecs').catch(() => []);
@@ -3321,7 +3314,7 @@ async function renderQuestions() {
     </div>
     ${r ? renderQuestionsList(r) : ''}
   </div>`;
-  html += `<div class="ai-card"><h3>已保存题本（${qb.length}）</h3>${qb.length?qb.map(q=>`<div class="ai-list-item"><div><b>${escapeHtml(q.title||'题本')}</b> <span class="meta">${escapeHtml(q.candidateName||'')} · ${escapeHtml(q.position||'')}</span></div><div><button class="btn btn-danger btn-xs" onclick="delQb('${q.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">生成后保存。</div>'}</div>`;
+  html += `<div class="ai-card"><h3>已保存题本（${qb.length}）</h3>${qb.length?qb.map(q=>`<div class="ai-list-item"><div><b>${escapeHtml(q.title||'题本')}</b> <span class="meta">${escapeHtml(q.candidateName||'')} · ${escapeHtml(q.position||'')}</span></div><div><button class="btn btn-outline btn-xs" onclick="viewRecord('questionBanks','${q.id}')">查看</button> <button class="btn btn-outline btn-xs" onclick="editRecord('questionBanks','${q.id}')">编辑</button> <button class="btn btn-danger btn-xs" onclick="removeRecord('questionBanks','${q.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">生成后保存。</div>'}</div>`;
   document.getElementById('aiSubContent').innerHTML = html;
 }
 
@@ -3360,8 +3353,6 @@ async function saveQuestionBank() {
   recruitAIState.questionsResult = null; showToast('题本已保存：'+title); renderQuestions();
 }
 
-async function delQb(id) { if (!confirm('确认删除？')) return; await apiDelete('/api/questionBanks/'+id); showToast('已删除'); renderQuestions(); }
-
 // ---------- 4. 录用决策 ----------
 async function renderDecision() {
   const cands = await apiGet('/api/candidates').catch(()=>[]);
@@ -3377,9 +3368,9 @@ async function renderDecision() {
       <button class="btn btn-primary" id="btnDc" onclick="aiDecision()">AI 生成综合评估报告</button>
       <button class="btn btn-outline" onclick="saveDecision()">保存决策</button>
     </div>
-    ${r ? `<div class="ai-result"><b>建议：${escapeHtml(r.recommendation||'')}</b>\\n${escapeHtml(r.summary||'')}\\n\\n<b>优势：</b>\\n${(r.strengths||[]).map(x=>'· '+x).join('\\n')}\\n<b>风险：</b>\\n${(r.risks||[]).map(x=>'· '+x).join('\\n')}\\n<b>薪酬建议：</b>${escapeHtml(r.salarySuggestion?.range||'')}（${escapeHtml(r.salarySuggestion?.notes||'')}）</div>` : ''}
+    ${r ? `<div class="ai-result"><b>建议：${escapeHtml(r.recommendation||'')}</b><br>${escapeHtml(r.summary||'')}<br><br><b>优势：</b><br>${(r.strengths||[]).map(x=>'· '+x).join('<br>')}<br><b>风险：</b><br>${(r.risks||[]).map(x=>'· '+x).join('<br>')}<br><b>薪酬建议：</b>${escapeHtml(r.salarySuggestion?.range||'')}（${escapeHtml(r.salarySuggestion?.notes||'')}）</div>` : ''}
   </div>`;
-  html += `<div class="ai-card"><h3>已保存决策（${dec.length}）</h3>${dec.length?dec.map(d=>`<div class="ai-list-item"><div><b>${escapeHtml(d.candidateName||'候选人')}</b> <span class="meta">${escapeHtml(d.position||'')} · ${escapeHtml(d.createdAt||'')} · ${escapeHtml(d.recommendation||'')}</span></div><div><button class="btn btn-danger btn-xs" onclick="delDecision('${d.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">生成后保存。</div>'}</div>`;
+  html += `<div class="ai-card"><h3>已保存决策（${dec.length}）</h3>${dec.length?dec.map(d=>`<div class="ai-list-item"><div><b>${escapeHtml(d.candidateName||'候选人')}</b> <span class="meta">${escapeHtml(d.position||'')} · ${escapeHtml(d.createdAt||'')} · ${escapeHtml(d.recommendation||'')}</span></div><div><button class="btn btn-outline btn-xs" onclick="viewRecord('hiringDecisions','${d.id}')">查看</button> <button class="btn btn-outline btn-xs" onclick="editRecord('hiringDecisions','${d.id}')">编辑</button> <button class="btn btn-danger btn-xs" onclick="removeRecord('hiringDecisions','${d.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">生成后保存。</div>'}</div>`;
   document.getElementById('aiSubContent').innerHTML = html;
 }
 
@@ -3408,8 +3399,6 @@ async function saveDecision() {
   recruitAIState.decisionResult = null; showToast('决策已保存'); renderDecision();
 }
 
-async function delDecision(id) { if (!confirm('确认删除？')) return; await apiDelete('/api/hiringDecisions/'+id); showToast('已删除'); renderDecision(); }
-
 // ---------- 5. 试用期管理 ----------
 async function renderProbation() {
   const jobs = await apiGet('/api/jobSpecs').catch(() => []);
@@ -3430,9 +3419,9 @@ async function renderProbation() {
       <button class="btn btn-primary" id="btnPb" onclick="aiProbation()">AI 生成个性化试用期目标</button>
       <button class="btn btn-outline" onclick="saveProbation()">保存方案</button>
     </div>
-    ${r ? `<div class="ai-result"><b>阶段目标：</b>\\n${(r.goals||[]).map(g=>'【'+g.phase+'】'+g.objective+'（KPI：'+g.kpi+'）\\n评估要点：'+(g.evalPoints||'')).join('\\n')}\\n\\n<b>评估要点说明：</b>${escapeHtml(r.evalTemplate||'')}\\n\\n<b>决策建议：</b>${escapeHtml(r.decisionAdvice||'')}</div>` : ''}
+    ${r ? `<div class="ai-result"><b>试用期阶段目标（分阶段展示）</b>${(r.goals||[]).map(g=>`<div style="margin:8px 0;padding:10px;border-left:4px solid var(--primary);background:#f7f9fc"><div style="font-weight:600;margin-bottom:4px">${escapeHtml(g.phase||'')}</div><div>目标：${escapeHtml(g.objective||'')}</div><div>KPI：${escapeHtml(g.kpi||'')}</div><div>评估要点：${escapeHtml(g.evalPoints||'')}</div></div>`).join('')}<div style="margin-top:8px"><b>评估要点说明：</b>${escapeHtml(r.evalTemplate||'')}</div><div><b>决策建议：</b>${escapeHtml(r.decisionAdvice||'')}</div></div>` : ''}
   </div>`;
-  html += `<div class="ai-card"><h3>已保存试用期方案（${pb.length}）</h3>${pb.length?pb.map(p=>`<div class="ai-list-item"><div><b>${escapeHtml(p.candidateName||p.position||'方案')}</b> <span class="meta">${escapeHtml(p.position||'')} · ${escapeHtml(p.createdAt||'')}</span></div><div><button class="btn btn-danger btn-xs" onclick="delProbation('${p.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">生成后保存。</div>'}</div>`;
+  html += `<div class="ai-card"><h3>已保存试用期方案（${pb.length}）</h3>${pb.length?pb.map(p=>`<div class="ai-list-item"><div><b>${escapeHtml(p.candidateName||p.position||'方案')}</b> <span class="meta">${escapeHtml(p.position||'')} · ${escapeHtml(p.createdAt||'')}</span></div><div><button class="btn btn-outline btn-xs" onclick="viewRecord('probations','${p.id}')">查看</button> <button class="btn btn-outline btn-xs" onclick="editRecord('probations','${p.id}')">编辑</button> <button class="btn btn-danger btn-xs" onclick="removeRecord('probations','${p.id}')">删除</button></div></div>`).join(''):'<div class="ai-muted">生成后保存。</div>'}</div>`;
   document.getElementById('aiSubContent').innerHTML = html;
 }
 
@@ -3462,8 +3451,6 @@ async function saveProbation() {
   recruitAIState.probationResult = null; showToast('方案已保存'); renderProbation();
 }
 
-async function delProbation(id) { if (!confirm('确认删除？')) return; await apiDelete('/api/probations/'+id); showToast('已删除'); renderProbation(); }
-
 // ---------- 6. 人才库 & 看板 ----------
 async function renderTalentPool() {
   const cands = await apiGet('/api/candidates').catch(()=>[]);
@@ -3484,10 +3471,10 @@ async function renderTalentPool() {
   </div>`;
   html += `<div class="ai-card"><h3>人才库</h3>`;
   if (total) {
-    html += `<table class="ai-table"><thead><tr><th>姓名</th><th>岗位名称</th><th>生成日期</th><th>匹配分数</th><th>录用建议</th><th>备注</th></tr></thead><tbody>`;
+    html += `<table class="ai-table"><thead><tr><th>姓名</th><th>岗位名称</th><th>生成日期</th><th>匹配分数</th><th>录用建议</th><th>备注</th><th>操作</th></tr></thead><tbody>`;
     html += cands.map(c => {
       const d = decMap[c.id];
-      return `<tr><td>${escapeHtml(c.name||'未命名')}</td><td>${escapeHtml(c.position||'')}</td><td>${escapeHtml(c.createdAt||'')}</td><td>${c.matchScore!=null?c.matchScore+'分':'-'}</td><td>${escapeHtml(d?d.recommendation:'—')}</td><td>${escapeHtml((c.tags||[]).join('、')||'—')}</td></tr>`;
+      return `<tr><td>${escapeHtml(c.name||'未命名')}</td><td>${escapeHtml(c.position||'')}</td><td>${escapeHtml(c.createdAt||'')}</td><td>${c.matchScore!=null?c.matchScore+'分':'-'}</td><td>${escapeHtml(d?d.recommendation:'—')}</td><td>${escapeHtml((c.tags||[]).join('、')||'—')}</td><td><button class="btn btn-outline btn-xs" onclick="viewRecord('candidates','${c.id}')">查看</button> <button class="btn btn-outline btn-xs" onclick="editRecord('candidates','${c.id}')">编辑</button> <button class="btn btn-danger btn-xs" onclick="removeRecord('candidates','${c.id}')">删除</button></td></tr>`;
     }).join('');
     html += `</tbody></table>`;
   } else {
@@ -3497,6 +3484,150 @@ async function renderTalentPool() {
   document.getElementById('aiSubContent').innerHTML = html;
 }
 
+// ---------- 通用：已保存记录的 查看 / 编辑 / 删除 ----------
+const RECORD_STATE_KEY = { jobSpecs:'jobs', candidates:'candidates', questionBanks:'qb', hiringDecisions:'decisions', probations:'probations' };
+function collTitle(c){ return {jobSpecs:'岗位标准',candidates:'候选人',questionBanks:'面试题本',hiringDecisions:'录用决策',probations:'试用期方案'}[c]||c; }
+function findRecord(coll, id){ const arr = recruitAIState[RECORD_STATE_KEY[coll]||'']||[]; return arr.find(x=>x.id===id); }
+
+function detailHtml(coll, it){
+  if(coll==='jobSpecs'){
+    const duties=(it.duties||[]).map(d=>`<li>${escapeHtml(d)}</li>`).join('');
+    const req=(it.requirementsList||it.requirements||[]).map(x=>`<li>${escapeHtml(x)}</li>`).join('');
+    const comp=(it.competencies||[]).map(c=>`<div style="margin:6px 0"><b>${escapeHtml(c.category||'')}</b>：${(c.items||[]).map(i=>'['+escapeHtml(i.involve||'')+'] '+escapeHtml(i.name||'')+'：'+escapeHtml(i.desc||'')).join('；')}</div>`).join('');
+    return `<div><p><b>岗位：</b>${escapeHtml(it.position||'')} ｜ ${escapeHtml(it.dept||'')} · ${escapeHtml(it.level||'')}</p>
+      <p><b>岗位职责</b></p><ol style="margin:4px 0;padding-left:20px">${duties||'<li>—</li>'}</ol>
+      <p><b>岗位要求</b></p><ol style="margin:4px 0;padding-left:20px">${req||'<li>—</li>'}</ol>
+      <p><b>胜任力</b></p>${comp||'—'}
+      <p><b>合规提示</b></p><div>${escapeHtml(it.complianceNotes||'—')}</div></div>`;
+  }
+  if(coll==='candidates'){
+    const b=it.parsed&&it.parsed.basic?it.parsed.basic:{};
+    const edu=(it.parsed&&it.parsed.education||[]).map(e=>escapeHtml([e.school,e.major,e.degree,e.gradDate].filter(Boolean).join(' / '))).join('<br>')||'—';
+    const work=(it.parsed&&it.parsed.work||[]).map(w=>escapeHtml([w.company,w.position,(w.startDate||'')+'~'+(w.endDate||'')].filter(Boolean).join(' · '))).join('<br>')||'—';
+    const skills=(it.parsed&&it.parsed.skills||[]).join('、')||'—';
+    const certs=(it.parsed&&it.parsed.certificates||[]).join('、')||'—';
+    return `<div><p><b>姓名：</b>${escapeHtml(it.name||'')} ｜ <b>应聘岗位：</b>${escapeHtml(it.position||'')} ｜ <b>匹配：</b>${it.matchScore!=null?it.matchScore+'分':'—'}</p>
+      <p><b>基本信息</b></p><div>性别 ${escapeHtml(b.gender||'—')} ｜ 年龄 ${escapeHtml(b.age||'—')} ｜ 婚育 ${escapeHtml(b.maritalStatus||'—')} ｜ 现居 ${escapeHtml(b.currentLocation||'—')} ｜ 期望 ${escapeHtml(b.expectedLocation||'—')} ｜ 电话 ${escapeHtml(b.phone||'—')} ｜ 当前薪 ${escapeHtml(b.currentSalary||'—')} ｜ 期望薪 ${escapeHtml(b.expectedSalary||'—')}</div>
+      <p><b>教育</b></p><div>${edu}</div>
+      <p><b>工作</b></p><div>${work}</div>
+      <p><b>技能</b></p><div>${skills}</div>
+      <p><b>证书</b></p><div>${certs}</div>
+      ${it.matchDetail?`<p><b>匹配详情</b></p><div>${escapeHtml(it.matchDetail.summary||'')}</div>`:''}
+      ${it.anomalies?`<p><b>异常</b></p><div>${(it.anomalies.issues||[]).map(x=>'['+x.severity+']'+x.type+'：'+x.desc).join('；')||'无'}</div>`:''}
+      <p><b>备注</b></p><div>${(it.tags||[]).join('、')||'—'}</div></div>`;
+  }
+  if(coll==='questionBanks'){
+    const qs=(it.questions||[]).map(q=>`<div class="ai-q"><div class="cat">${escapeHtml(q.category||'')}</div><div class="q">${escapeHtml(q.question||'')}</div><div class="sub">考察要点：${escapeHtml(q.points||'')}<br>评分标准：${escapeHtml(q.scoreStd||'')}<br>追问：${escapeHtml(q.followUp||'')}</div></div>`).join('');
+    return `<div><p><b>题本：</b>${escapeHtml(it.title||'')} ｜ ${escapeHtml(it.candidateName||'')} · ${escapeHtml(it.position||'')} ｜ ${escapeHtml(it.createdAt||'')}</p>${qs}</div>`;
+  }
+  if(coll==='hiringDecisions'){
+    return `<div><p><b>候选人：</b>${escapeHtml(it.candidateName||'')} ｜ ${escapeHtml(it.position||'')} ｜ ${escapeHtml(it.createdAt||'')}</p>
+      <p><b>建议：</b>${escapeHtml(it.recommendation||'—')}</p>
+      <p><b>综合评语</b></p><div>${escapeHtml(it.summary||'—')}</div>
+      <p><b>优势</b></p><div>${(it.strengths||[]).map(x=>'· '+escapeHtml(x)).join('<br>')||'—'}</div>
+      <p><b>风险</b></p><div>${(it.risks||[]).map(x=>'· '+escapeHtml(x)).join('<br>')||'—'}</div>
+      <p><b>薪酬建议</b></p><div>${escapeHtml(it.salarySuggestion&&it.salarySuggestion.range||'—')}（${escapeHtml(it.salarySuggestion&&it.salarySuggestion.notes||'')}）</div></div>`;
+  }
+  if(coll==='probations'){
+    const goals=(it.goals||[]).map(g=>`<div style="margin:8px 0;padding:8px;border-left:4px solid var(--primary);background:#f7f9fc"><b>${escapeHtml(g.phase||'')}</b><br>目标：${escapeHtml(g.objective||'')}<br>KPI：${escapeHtml(g.kpi||'')}<br>评估要点：${escapeHtml(g.evalPoints||'')}</div>`).join('');
+    return `<div><p><b>方案：</b>${escapeHtml(it.candidateName||'')} ｜ ${escapeHtml(it.position||'')} ｜ ${escapeHtml(it.createdAt||'')}</p>
+      <p><b>阶段目标</b></p>${goals}
+      <p><b>评估要点说明</b></p><div>${escapeHtml(it.evalTemplate||'—')}</div>
+      <p><b>决策建议</b></p><div>${escapeHtml(it.decisionAdvice||'—')}</div></div>`;
+  }
+  return '<div>'+escapeHtml(JSON.stringify(it))+'</div>';
+}
+
+function editHtml(coll, it){
+  if(coll==='jobSpecs'){
+    return `<div class="ai-field"><label>岗位名称</label><input id="ed_position" value="${escapeHtml(it.position||'')}"></div>
+      <div class="ai-field"><label>所属部门</label><input id="ed_dept" value="${escapeHtml(it.dept||'')}"></div>
+      <div class="ai-field"><label>岗位层级</label><input id="ed_level" value="${escapeHtml(it.level||'')}"></div>
+      <div class="ai-field"><label>岗位职责（每行一项）</label><textarea id="ed_duties" style="min-height:110px">${(it.duties||[]).map(d=>escapeHtml(d)).join('\n')}</textarea></div>
+      <div class="ai-field"><label>岗位要求（每行一项）</label><textarea id="ed_requirements" style="min-height:110px">${(it.requirementsList||it.requirements||[]).map(x=>escapeHtml(x)).join('\n')}</textarea></div>
+      <div class="ai-field"><label>合规提示</label><textarea id="ed_compliance">${escapeHtml(it.complianceNotes||'')}</textarea></div>
+      <div class="ai-field"><label>胜任力（JSON）</label><textarea id="ed_competencies" style="min-height:90px">${escapeHtml(JSON.stringify(it.competencies||[]))}</textarea></div>`;
+  }
+  if(coll==='candidates'){
+    return `<div class="ai-field"><label>姓名</label><input id="ed_name" value="${escapeHtml(it.name||'')}"></div>
+      <div class="ai-field"><label>应聘岗位</label><input id="ed_position" value="${escapeHtml(it.position||'')}"></div>
+      <div class="ai-field"><label>匹配分数</label><input id="ed_matchScore" value="${it.matchScore!=null?it.matchScore:''}"></div>
+      <div class="ai-field"><label>备注标签（顿号分隔）</label><input id="ed_tags" value="${escapeHtml((it.tags||[]).join('、'))}"></div>
+      <div class="ai-field"><label>解析详情 parsed（JSON，可改）</label><textarea id="ed_parsed" style="min-height:160px">${escapeHtml(JSON.stringify(it.parsed||{}))}</textarea></div>`;
+  }
+  if(coll==='questionBanks'){
+    return `<div class="ai-field"><label>题本标题</label><input id="ed_title" value="${escapeHtml(it.title||'')}"></div>
+      <div class="ai-field"><label>候选人</label><input id="ed_candidateName" value="${escapeHtml(it.candidateName||'')}"></div>
+      <div class="ai-field"><label>岗位</label><input id="ed_position" value="${escapeHtml(it.position||'')}"></div>
+      <div class="ai-field"><label>题目（JSON 数组）</label><textarea id="ed_questions" style="min-height:180px">${escapeHtml(JSON.stringify(it.questions||[]))}</textarea></div>`;
+  }
+  if(coll==='hiringDecisions'){
+    return `<div class="ai-field"><label>候选人</label><input id="ed_candidateName" value="${escapeHtml(it.candidateName||'')}"></div>
+      <div class="ai-field"><label>岗位</label><input id="ed_position" value="${escapeHtml(it.position||'')}"></div>
+      <div class="ai-field"><label>录用建议</label><input id="ed_recommendation" value="${escapeHtml(it.recommendation||'')}"></div>
+      <div class="ai-field"><label>综合评语</label><textarea id="ed_summary">${escapeHtml(it.summary||'')}</textarea></div>
+      <div class="ai-field"><label>优势（JSON 数组）</label><textarea id="ed_strengths" style="min-height:70px">${escapeHtml(JSON.stringify(it.strengths||[]))}</textarea></div>
+      <div class="ai-field"><label>风险（JSON 数组）</label><textarea id="ed_risks" style="min-height:70px">${escapeHtml(JSON.stringify(it.risks||[]))}</textarea></div>
+      <div class="ai-field"><label>薪酬建议（JSON）</label><textarea id="ed_salarySuggestion" style="min-height:60px">${escapeHtml(JSON.stringify(it.salarySuggestion||{}))}</textarea></div>`;
+  }
+  if(coll==='probations'){
+    return `<div class="ai-field"><label>候选人</label><input id="ed_candidateName" value="${escapeHtml(it.candidateName||'')}"></div>
+      <div class="ai-field"><label>岗位</label><input id="ed_position" value="${escapeHtml(it.position||'')}"></div>
+      <div class="ai-field"><label>阶段目标 goals（JSON 数组）</label><textarea id="ed_goals" style="min-height:160px">${escapeHtml(JSON.stringify(it.goals||[]))}</textarea></div>
+      <div class="ai-field"><label>评估要点说明</label><textarea id="ed_evalTemplate">${escapeHtml(it.evalTemplate||'')}</textarea></div>
+      <div class="ai-field"><label>决策建议</label><textarea id="ed_decisionAdvice">${escapeHtml(it.decisionAdvice||'')}</textarea></div>`;
+  }
+  return '';
+}
+
+function readEdit(coll, id){
+  try {
+    if(coll==='jobSpecs'){
+      return {
+        position: val('ed_position'), dept: val('ed_dept'), level: val('ed_level'),
+        duties: (val('ed_duties')||'').split('\n').map(s=>s.trim()).filter(Boolean),
+        requirementsList: (val('ed_requirements')||'').split('\n').map(s=>s.trim()).filter(Boolean),
+        complianceNotes: val('ed_compliance'),
+        competencies: JSON.parse(val('ed_competencies')||'[]')
+      };
+    }
+    if(coll==='candidates'){
+      return {
+        name: val('ed_name'), position: val('ed_position'),
+        matchScore: val('ed_matchScore')===''?null:Number(val('ed_matchScore')),
+        tags: (val('ed_tags')||'').split(/[，,、]/).map(s=>s.trim()).filter(Boolean),
+        parsed: JSON.parse(val('ed_parsed')||'{}')
+      };
+    }
+    if(coll==='questionBanks'){
+      return { title: val('ed_title'), candidateName: val('ed_candidateName'), position: val('ed_position'), questions: JSON.parse(val('ed_questions')||'[]') };
+    }
+    if(coll==='hiringDecisions'){
+      return { candidateName: val('ed_candidateName'), position: val('ed_position'), recommendation: val('ed_recommendation'), summary: val('ed_summary'), strengths: JSON.parse(val('ed_strengths')||'[]'), risks: JSON.parse(val('ed_risks')||'[]'), salarySuggestion: JSON.parse(val('ed_salarySuggestion')||'{}') };
+    }
+    if(coll==='probations'){
+      return { candidateName: val('ed_candidateName'), position: val('ed_position'), goals: JSON.parse(val('ed_goals')||'[]'), evalTemplate: val('ed_evalTemplate'), decisionAdvice: val('ed_decisionAdvice') };
+    }
+  } catch(e){ showToast('编辑内容格式有误：'+e.message); return null; }
+  return {};
+}
+
+function viewRecord(coll, id){
+  const it = findRecord(coll, id); if(!it) return;
+  showModal(`<h3>${collTitle(coll)} · 详情</h3>${detailHtml(coll,it)}<div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">关闭</button><button class="btn btn-primary" onclick="editRecord('${coll}','${id}')">编辑</button><button class="btn btn-danger" onclick="removeRecord('${coll}','${id}')">删除</button></div>`);
+}
+function editRecord(coll, id){
+  const it = findRecord(coll, id); if(!it) return;
+  showModal(`<h3>${collTitle(coll)} · 编辑</h3>${editHtml(coll,it)}<div class="modal-actions"><button class="btn btn-outline" onclick="viewRecord('${coll}','${id}')">取消</button><button class="btn btn-primary" onclick="saveEdit('${coll}','${id}')">保存</button></div>`);
+}
+async function removeRecord(coll, id){
+  if(!confirm('确认删除该记录？此操作不可恢复。')) return;
+  await apiDelete('/api/'+coll+'/'+id); closeModal(); showToast('已删除'); renderRecruitAI();
+}
+async function saveEdit(coll, id){
+  const body = readEdit(coll, id); if(!body) return;
+  await apiPut('/api/'+coll+'/'+id, body); closeModal(); showToast('已保存'); renderRecruitAI();
+}
 // 通用取值/赋值辅助
 function fld(label, id, value) { return `<div class="ai-field"><label>${label}</label><input id="${id}" value="${escapeHtml(value||'')}"></div>`; }
 function val(id) { const el = document.getElementById(id); return el ? el.value : ''; }
