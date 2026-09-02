@@ -42,6 +42,7 @@ let tokens = {};
 // across redeploys. Any Postgres error automatically degrades to the file store (no crash).
 let pgClient = null;
 let usePg = false;
+let lastPgError = '';
 
 function loadDb() {
   try {
@@ -69,6 +70,7 @@ async function initStore() {
       usePg = true;
       return;
     } catch (e) {
+      lastPgError = e.message;
       console.error('Postgres init failed, falling back to FILE store:', e.message);
       console.error('⚠️ 未使用持久化数据库：当前为文件存储(data/db.json)。在 Render 等临时文件系统的平台上，每次重新部署都会清空数据！请检查 DATABASE_URL 是否正确（推荐 Neon/Render 免费 Postgres）。');
       usePg = false;
@@ -1614,7 +1616,7 @@ addCrud('probations');
 
 // ========== Health endpoint (register BEFORE the SPA fallback so the wildcard never shadows it) ==========
 app.get('/health', (req, res) => {
-  res.json({ ok: true, ts: Date.now(), store: usePg ? 'postgres' : 'file', interviews: db.interviews.length, positions: db.positions.length });
+  res.json({ ok: true, ts: Date.now(), store: usePg ? 'postgres' : 'file', dbUrlSet: !!process.env.DATABASE_URL, pgError: lastPgError, interviews: db.interviews.length, positions: db.positions.length });
 });
 
 // ========== SPA fallback (must be LAST so it never shadows /api routes) ==========
