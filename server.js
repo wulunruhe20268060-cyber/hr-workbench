@@ -69,7 +69,8 @@ async function initStore() {
       usePg = true;
       return;
     } catch (e) {
-      console.error('Postgres init failed, falling back to file store:', e.message);
+      console.error('Postgres init failed, falling back to FILE store:', e.message);
+      console.error('⚠️ 未使用持久化数据库：当前为文件存储(data/db.json)。在 Render 等临时文件系统的平台上，每次重新部署都会清空数据！请检查 DATABASE_URL 是否正确（推荐 Neon/Render 免费 Postgres）。');
       usePg = false;
     }
   }
@@ -281,9 +282,10 @@ function seedDb() {
 // 确保默认成员始终存在：每次启动检查，缺失则补建。
 // 这样无论本地文件存储还是切到 Postgres，重部署都不会丢失成员账号与权限。
 function ensureDefaultUsers() {
+  // 王燕(wangyan) 默认设为「合同管理员」(contract_admin)，拥有合同管理模块权限。
   const defaults = [
     { username: 'shijun', password: 'shijun123', role: 'member', displayName: '施骏' },
-    { username: 'wangyan', password: 'wangyan123', role: 'member', displayName: '王燕' },
+    { username: 'wangyan', password: 'wangyan123', role: 'contract_admin', displayName: '王燕' },
     { username: 'zhangliwen', password: 'zhangliwen123', role: 'member', displayName: '张丽雯' }
   ];
   let changed = false;
@@ -295,7 +297,14 @@ function ensureDefaultUsers() {
       salt, password: hashPass(u.password, salt), displayName: u.displayName
     });
     changed = true;
-    console.log(`Ensured default member: ${u.username} / ${u.displayName}`);
+    console.log(`Ensured default member: ${u.username} / ${u.displayName} (role=${u.role})`);
+  }
+  // 对已存在但仍是「普通成员」的王燕，按默认升级为合同管理员（仅升级、不降级，避免覆盖管理员的主动调整）。
+  const wangyan = db.users.find(u => u.username === 'wangyan');
+  if (wangyan && wangyan.role === 'member') {
+    wangyan.role = 'contract_admin';
+    changed = true;
+    console.log('王燕 (wangyan) 已按默认升级为合同管理员 contract_admin');
   }
   if (changed) saveDb();
 }
