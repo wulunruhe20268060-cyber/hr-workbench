@@ -1980,6 +1980,11 @@ async function addCheckin(hireId, periodId) {
       <h3>添加随访记录 - ${escapeHtml(period.name)}</h3>
       <div style="margin-bottom:12px"><label>随访日期</label><input id="ca_date" type="date" value="${todayStr}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:14px"></div>
       ${qFields || '<div style="color:var(--text2);font-size:12px;margin-bottom:8px">该周期暂无问题，请先点击"编辑"添加问题</div>'}
+      <div style="margin-bottom:12px">
+        <label>快速粘贴答案（按问题顺序用 <code>;</code> 分号分隔，自动填充下方各题）</label>
+        <textarea id="ca_bulk" rows="3" placeholder="整体适应良好；团队氛围融洽；已能独立完成基础任务" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:14px;resize:vertical;font-family:inherit"></textarea>
+        <button type="button" class="btn btn-outline btn-sm" style="margin-top:6px" onclick="autoFillCheckinAnswers(${questions.length})">自动拆分填充</button>
+      </div>
       <div style="margin-bottom:8px"><label>反馈/建议</label><input id="ca_feedback" placeholder="可选" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:14px"></div>
       <div style="margin-bottom:8px"><label>备注</label><input id="ca_notes" placeholder="可选" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:14px"></div>
       <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="saveCheckin('${hireId}','${periodId}',${questions.length})">保存</button></div>
@@ -2003,6 +2008,20 @@ async function saveCheckin(hireId, periodId, qCount) {
     });
     closeModal(); await render(); showToast('随访记录已添加');
   } catch(e) { showToast(e.message); }
+}
+
+function autoFillCheckinAnswers(qCount) {
+  const el = document.getElementById('ca_bulk');
+  if (!el) return;
+  const text = el.value || '';
+  if (!text.trim()) { showToast('请先在上方粘贴内容'); return; }
+  const parts = text.split(/;|；/).map(s => s.trim()).filter(Boolean);
+  let filled = 0;
+  for (let i = 0; i < Math.min(qCount, parts.length); i++) {
+    const ta = document.getElementById('ca_' + i);
+    if (ta) { ta.value = parts[i]; filled++; }
+  }
+  showToast('已自动填充 ' + filled + ' 题答案');
 }
 
 async function batchImportCheckins(hireId, periodId) {
@@ -3116,7 +3135,8 @@ let recruitAIState = {
   questionsResult: null, _qbCand: null, _qbJob: null,
   decisionResult: null,
   probationResult: null, _pbCand: null, _pbJob: null,
-  jobs: [], candidates: [], qb: [], decisions: [], probations: []
+  jobs: [], candidates: [], qb: [], decisions: [], probations: [],
+  rsJobId: ''
 };
 
 function ensureAIStyles() {
@@ -3204,9 +3224,9 @@ async function renderJobSpec() {
       <button class="btn btn-outline" onclick="saveJobSpec()">保存岗位标准</button>
     </div>`;
   if (r) {
-    const dutiesHtml = (r.duties||[]).map(d=>`<li>${escapeHtml(d)}</li>`).join('');
-    const reqHtml = (r.requirements||[]).map(x=>`<li>${escapeHtml(x)}</li>`).join('');
-    const compHtml = (r.competencies||[]).map(c=>`<div style="margin:6px 0"><b>${escapeHtml(c.category||'')}</b>：${(c.items||[]).map(i=>'['+escapeHtml(i.involve||'')+'] '+escapeHtml(i.name||'')+'：'+escapeHtml(i.desc||'')).join('；')}</div>`).join('');
+    const dutiesHtml = (r.duties||[]).map((d,i)=>`<li><span style="color:var(--text-2);margin-right:4px">${i+1}.</span>${escapeHtml(d)}</li>`).join('');
+    const reqHtml = (r.requirements||[]).map((x,i)=>`<li><span style="color:var(--text-2);margin-right:4px">${i+1}.</span>${escapeHtml(x)}</li>`).join('');
+    const compHtml = (r.competencies||[]).map((c,ci)=>`<div style="margin:10px 0"><div style="font-weight:600;color:var(--text);margin-bottom:4px">${ci+1}. ${escapeHtml(c.category||'')}</div><ol style="margin:4px 0;padding-left:20px;list-style:none">${(c.items||[]).map((i,ii)=>`<li><span style="color:var(--primary);font-weight:600">[${escapeHtml(i.involve||'')}]</span> <b>${escapeHtml(i.name||'')}</b>：${escapeHtml(i.desc||'')}</li>`).join('')||'<li>—</li>'}</ol></div>`).join('');
     html += `<div class="ai-result" style="white-space:normal">
       <div class="ai-row" style="margin-bottom:10px">
         <div class="ai-field"><label>岗位名称</label><input id="js_r_position" value="${escapeHtml(r.position||'')}"></div>
@@ -3267,7 +3287,7 @@ async function renderResumeParse() {
   let html = `<div class="ai-card">
     <h3>简历智能识别 → 人才登记表自动回填（支持批量）</h3>
     <div class="ai-field"><label>批量上传简历（支持 Word / PDF / JPG / PNG / TXT / MD）</label><input type="file" id="rs_files" multiple accept=".txt,.md,.pdf,.doc,.docx,.jpg,.jpeg,.png" onchange="handleResumeFiles(this)"></div>
-    <div class="ai-row"><div class="ai-field"><label>关联岗位标准（用于人岗匹配/面试题库）</label><select id="rs_job">${jobs.map(j=>`<option value="${j.id}">${escapeHtml(j.position)}</option>`).join('')||'<option value="">（无岗位标准）</option>'}</select></div></div>
+    <div class="ai-row"><div class="ai-field"><label>关联岗位标准（用于人岗匹配/面试题库）</label><select id="rs_job" onchange="recruitAIState.rsJobId=this.value">${(()=>{const sel=recruitAIState.rsJobId&&jobs.some(j=>j.id===recruitAIState.rsJobId)?recruitAIState.rsJobId:(jobs[0]?.id||'');return jobs.map(j=>`<option value="${j.id}" ${j.id===sel?'selected':''}>${escapeHtml(j.position)}</option>`).join('')||'<option value="">（无岗位标准）</option>'})()}</select></div></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="btn btn-primary" id="btnRsParse" onclick="aiParseAll()">一键解析全部</button>
       <button class="btn btn-primary" id="btnRsMatch" onclick="aiMatchAll()" ${jobs.length?'':'disabled'}>一键人岗匹配</button>
@@ -3672,13 +3692,13 @@ function findRecord(coll, id){ const arr = recruitAIState[RECORD_STATE_KEY[coll]
 
 function detailHtml(coll, it){
   if(coll==='jobSpecs'){
-    const duties=(it.duties||[]).map(d=>`<li>${escapeHtml(d)}</li>`).join('');
-    const req=(it.requirementsList||it.requirements||[]).map(x=>`<li>${escapeHtml(x)}</li>`).join('');
-    const comp=(it.competencies||[]).map(c=>`<div style="margin:6px 0"><b>${escapeHtml(c.category||'')}</b>：${(c.items||[]).map(i=>'['+escapeHtml(i.involve||'')+'] '+escapeHtml(i.name||'')+'：'+escapeHtml(i.desc||'')).join('；')}</div>`).join('');
+    const duties=(it.duties||[]).map((d,i)=>`<li><span style="color:var(--text-2);margin-right:4px">${i+1}.</span>${escapeHtml(d)}</li>`).join('');
+    const req=(it.requirementsList||it.requirements||[]).map((x,i)=>`<li><span style="color:var(--text-2);margin-right:4px">${i+1}.</span>${escapeHtml(x)}</li>`).join('');
+    const comp=(it.competencies||[]).map((c,ci)=>`<div style="margin:10px 0"><div style="font-weight:600;color:var(--text);margin-bottom:4px">${ci+1}. ${escapeHtml(c.category||'')}</div><ol style="margin:4px 0;padding-left:20px">${(c.items||[]).map((i,ii)=>`<li><span style="color:var(--primary);font-weight:600">[${escapeHtml(i.involve||'')}]</span> <b>${escapeHtml(i.name||'')}</b>：${escapeHtml(i.desc||'')}</li>`).join('')||'<li>—</li>'}</ol></div>`).join('');
     return `<div><p><b>岗位：</b>${escapeHtml(it.position||'')} ｜ ${escapeHtml(it.dept||'')} · ${escapeHtml(it.level||'')}</p>
-      <p><b>岗位职责</b></p><ol style="margin:4px 0;padding-left:20px">${duties||'<li>—</li>'}</ol>
-      <p><b>岗位要求</b></p><ol style="margin:4px 0;padding-left:20px">${req||'<li>—</li>'}</ol>
-      <p><b>胜任力</b></p>${comp||'—'}
+      <p><b>岗位职责</b></p><ol style="margin:4px 0;padding-left:20px;list-style:none">${duties||'<li>—</li>'}</ol>
+      <p><b>岗位要求</b></p><ol style="margin:4px 0;padding-left:20px;list-style:none">${req||'<li>—</li>'}</ol>
+      <p><b>胜任力模型</b></p>${comp||'—'}
       <p><b>合规提示</b></p><div>${escapeHtml(it.complianceNotes||'—')}</div></div>`;
   }
   if(coll==='candidates'){
@@ -3719,42 +3739,80 @@ function detailHtml(coll, it){
   return '<div>'+escapeHtml(JSON.stringify(it))+'</div>';
 }
 
+function competencyEditHtml(it){
+  const rows=(it.competencies||[]).flatMap((c,ci)=>(c.items||[]).map((i,ii)=>`
+    <div class="comp-row" style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;padding:8px;border:1px solid var(--border);border-radius:8px;background:#FAFAFB">
+      <input class="comp-cat" placeholder="等级" value="${escapeHtml(c.category||'')}" style="width:80px;flex-shrink:0;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:14px">
+      <div style="flex:1;display:flex;flex-direction:column;gap:6px;min-width:0">
+        <div style="display:flex;gap:8px">
+          <input class="comp-name" placeholder="胜任力名称" value="${escapeHtml(i.name||'')}" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:14px">
+          <input class="comp-involve" placeholder="主次" value="${escapeHtml(i.involve||'')}" style="width:80px;flex-shrink:0;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:14px">
+        </div>
+        <textarea class="comp-desc" placeholder="描述" rows="2" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:14px;resize:vertical">${escapeHtml(i.desc||'')}</textarea>
+      </div>
+      <button class="btn btn-danger btn-xs" onclick="this.closest('.comp-row').remove()">删除</button>
+    </div>
+  `)).join('');
+  return `<div class="ai-field"><label>胜任力模型（分段编辑，自动编号）</label>
+    <div id="compEditor" style="margin-bottom:8px">${rows}</div>
+    <button type="button" class="btn btn-outline btn-sm" onclick="addCompRow()">+ 添加胜任力项</button>
+  </div>`;
+}
+function addCompRow(){
+  const editor=document.getElementById('compEditor'); if(!editor) return;
+  const div=document.createElement('div'); div.className='comp-row'; div.style.cssText='display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;padding:8px;border:1px solid var(--border);border-radius:8px;background:#FAFAFB';
+  div.innerHTML=`<input class="comp-cat" placeholder="等级" value="" style="width:80px;flex-shrink:0;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:14px"><div style="flex:1;display:flex;flex-direction:column;gap:6px;min-width:0"><div style="display:flex;gap:8px"><input class="comp-name" placeholder="胜任力名称" value="" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:14px"><input class="comp-involve" placeholder="主次" value="" style="width:80px;flex-shrink:0;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:14px"></div><textarea class="comp-desc" placeholder="描述" rows="2" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:14px;resize:vertical"></textarea></div><button class="btn btn-danger btn-xs" onclick="this.closest('.comp-row').remove()">删除</button>`;
+  editor.appendChild(div);
+}
+function readCompetencies(){
+  const cats=[];
+  document.querySelectorAll('#compEditor .comp-row').forEach(row=>{
+    const catName=(row.querySelector('.comp-cat')?.value||'').trim()||'其他';
+    const name=(row.querySelector('.comp-name')?.value||'').trim();
+    if(!name) return;
+    let cat=cats.find(c=>c.category===catName);
+    if(!cat){ cat={category:catName,items:[]}; cats.push(cat); }
+    cat.items.push({name, involve:row.querySelector('.comp-involve')?.value||'', desc:row.querySelector('.comp-desc')?.value||''});
+  });
+  return cats;
+}
+
 function editHtml(coll, it){
   if(coll==='jobSpecs'){
     return `<div class="ai-field"><label>岗位名称</label><input id="ed_position" value="${escapeHtml(it.position||'')}"></div>
       <div class="ai-field"><label>所属部门</label><input id="ed_dept" value="${escapeHtml(it.dept||'')}"></div>
       <div class="ai-field"><label>岗位层级</label><input id="ed_level" value="${escapeHtml(it.level||'')}"></div>
-      <div class="ai-field"><label>岗位职责（每行一项）</label><textarea id="ed_duties" style="min-height:110px">${(it.duties||[]).map(d=>escapeHtml(d)).join('\n')}</textarea></div>
-      <div class="ai-field"><label>岗位要求（每行一项）</label><textarea id="ed_requirements" style="min-height:110px">${(it.requirementsList||it.requirements||[]).map(x=>escapeHtml(x)).join('\n')}</textarea></div>
+      <div class="ai-field"><label>岗位职责（每行一项，自动按序号展示）</label><textarea id="ed_duties" style="min-height:110px">${(it.duties||[]).map(d=>escapeHtml(d)).join('\n')}</textarea></div>
+      <div class="ai-field"><label>岗位要求（每行一项，自动按序号展示）</label><textarea id="ed_requirements" style="min-height:110px">${(it.requirementsList||it.requirements||[]).map(x=>escapeHtml(x)).join('\n')}</textarea></div>
       <div class="ai-field"><label>合规提示</label><textarea id="ed_compliance">${escapeHtml(it.complianceNotes||'')}</textarea></div>
-      <div class="ai-field"><label>胜任力（JSON）</label><textarea id="ed_competencies" style="min-height:90px">${escapeHtml(JSON.stringify(it.competencies||[]))}</textarea></div>`;
+      ${competencyEditHtml(it)}`;
   }
   if(coll==='candidates'){
     return `<div class="ai-field"><label>姓名</label><input id="ed_name" value="${escapeHtml(it.name||'')}"></div>
       <div class="ai-field"><label>应聘岗位</label><input id="ed_position" value="${escapeHtml(it.position||'')}"></div>
       <div class="ai-field"><label>匹配分数</label><input id="ed_matchScore" value="${it.matchScore!=null?it.matchScore:''}"></div>
       <div class="ai-field"><label>备注标签（顿号分隔）</label><input id="ed_tags" value="${escapeHtml((it.tags||[]).join('、'))}"></div>
-      <div class="ai-field"><label>解析详情 parsed（JSON，可改）</label><textarea id="ed_parsed" style="min-height:160px">${escapeHtml(JSON.stringify(it.parsed||{}))}</textarea></div>`;
+      <div class="ai-field"><label>解析详情（JSON，谨慎修改）</label><textarea id="ed_parsed" style="min-height:160px;font-family:monospace">${escapeHtml(JSON.stringify(it.parsed||{}, null, 2))}</textarea></div>`;
   }
   if(coll==='questionBanks'){
     return `<div class="ai-field"><label>题本标题</label><input id="ed_title" value="${escapeHtml(it.title||'')}"></div>
       <div class="ai-field"><label>候选人</label><input id="ed_candidateName" value="${escapeHtml(it.candidateName||'')}"></div>
       <div class="ai-field"><label>岗位</label><input id="ed_position" value="${escapeHtml(it.position||'')}"></div>
-      <div class="ai-field"><label>题目（JSON 数组）</label><textarea id="ed_questions" style="min-height:180px">${escapeHtml(JSON.stringify(it.questions||[]))}</textarea></div>`;
+      <div class="ai-field"><label>题目（JSON 数组，谨慎修改）</label><textarea id="ed_questions" style="min-height:180px;font-family:monospace">${escapeHtml(JSON.stringify(it.questions||[], null, 2))}</textarea></div>`;
   }
   if(coll==='hiringDecisions'){
     return `<div class="ai-field"><label>候选人</label><input id="ed_candidateName" value="${escapeHtml(it.candidateName||'')}"></div>
       <div class="ai-field"><label>岗位</label><input id="ed_position" value="${escapeHtml(it.position||'')}"></div>
       <div class="ai-field"><label>录用建议</label><input id="ed_recommendation" value="${escapeHtml(it.recommendation||'')}"></div>
       <div class="ai-field"><label>综合评语</label><textarea id="ed_summary">${escapeHtml(it.summary||'')}</textarea></div>
-      <div class="ai-field"><label>优势（JSON 数组）</label><textarea id="ed_strengths" style="min-height:70px">${escapeHtml(JSON.stringify(it.strengths||[]))}</textarea></div>
-      <div class="ai-field"><label>风险（JSON 数组）</label><textarea id="ed_risks" style="min-height:70px">${escapeHtml(JSON.stringify(it.risks||[]))}</textarea></div>
-      <div class="ai-field"><label>薪酬建议（JSON）</label><textarea id="ed_salarySuggestion" style="min-height:60px">${escapeHtml(JSON.stringify(it.salarySuggestion||{}))}</textarea></div>`;
+      <div class="ai-field"><label>优势（JSON 数组，谨慎修改）</label><textarea id="ed_strengths" style="min-height:70px;font-family:monospace">${escapeHtml(JSON.stringify(it.strengths||[], null, 2))}</textarea></div>
+      <div class="ai-field"><label>风险（JSON 数组，谨慎修改）</label><textarea id="ed_risks" style="min-height:70px;font-family:monospace">${escapeHtml(JSON.stringify(it.risks||[], null, 2))}</textarea></div>
+      <div class="ai-field"><label>薪酬建议（JSON，谨慎修改）</label><textarea id="ed_salarySuggestion" style="min-height:60px;font-family:monospace">${escapeHtml(JSON.stringify(it.salarySuggestion||{}, null, 2))}</textarea></div>`;
   }
   if(coll==='probations'){
     return `<div class="ai-field"><label>候选人</label><input id="ed_candidateName" value="${escapeHtml(it.candidateName||'')}"></div>
       <div class="ai-field"><label>岗位</label><input id="ed_position" value="${escapeHtml(it.position||'')}"></div>
-      <div class="ai-field"><label>阶段目标 goals（JSON 数组）</label><textarea id="ed_goals" style="min-height:160px">${escapeHtml(JSON.stringify(it.goals||[]))}</textarea></div>
+      <div class="ai-field"><label>阶段目标 goals（JSON 数组，谨慎修改）</label><textarea id="ed_goals" style="min-height:160px;font-family:monospace">${escapeHtml(JSON.stringify(it.goals||[], null, 2))}</textarea></div>
       <div class="ai-field"><label>评估要点说明</label><textarea id="ed_evalTemplate">${escapeHtml(it.evalTemplate||'')}</textarea></div>
       <div class="ai-field"><label>决策建议</label><textarea id="ed_decisionAdvice">${escapeHtml(it.decisionAdvice||'')}</textarea></div>`;
   }
@@ -3769,7 +3827,7 @@ function readEdit(coll, id){
         duties: (val('ed_duties')||'').split('\n').map(s=>s.trim()).filter(Boolean),
         requirementsList: (val('ed_requirements')||'').split('\n').map(s=>s.trim()).filter(Boolean),
         complianceNotes: val('ed_compliance'),
-        competencies: JSON.parse(val('ed_competencies')||'[]')
+        competencies: readCompetencies()
       };
     }
     if(coll==='candidates'){
