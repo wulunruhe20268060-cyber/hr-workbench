@@ -43,6 +43,7 @@ let tokens = {};
 let pgClient = null;
 let usePg = false;
 let lastPgError = '';
+let migratedFromFile = false;
 
 function loadDb() {
   try {
@@ -66,6 +67,17 @@ async function initStore() {
         console.log('DB loaded from Postgres');
       } else {
         console.log('No DB row in Postgres, will seed on first save');
+        // 一次性迁移：若本地文件已有数据，先载入并立即落库，避免从文件存储切换到 Postgres 时丢失
+        try {
+          if (fs.existsSync(DB_PATH)) {
+            const fileDb = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
+            if (fileDb && Object.keys(fileDb).length) {
+              db = fileDb;
+              migratedFromFile = true;
+              console.log('Loaded existing file data for one-time migration into Postgres');
+            }
+          }
+        } catch (e) { console.error('file->pg migration read error:', e.message); }
       }
       usePg = true;
       return;
@@ -1651,6 +1663,11 @@ app.get('*', (req, res) => {
   migrateTemplates();
   seedDb();
   ensureDefaultUsers();
+  // 若本次从文件存储迁移了数据到 Postgres，立即落库，确保不丢失
+  if (migratedFromFile) {
+    try { await saveDb(); console.log('Migrated existing file data into Postgres (persisted)'); }
+    catch (e) { console.error('Migration persist error:', e.message); }
+  }
 
   // 输出文档 .docx 导出（规范：人才登记表/题本/评估报告/录用建议 等）
   app.post('/api/ai/export-docx', authMiddleware, async (req, res) => {
