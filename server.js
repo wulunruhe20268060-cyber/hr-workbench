@@ -1589,34 +1589,34 @@ function addCrud(collection) {
   app.get(`/api/${cap}`, authMiddleware, (req, res) => {
     res.json(filterByUser(db[cap], req.userId, req.user.role));
   });
-  app.post(`/api/${cap}`, authMiddleware, (req, res) => {
+  app.post(`/api/${cap}`, authMiddleware, async (req, res) => {
     const item = {
       id: genId(), ...req.body,
       createdBy: req.userId,
       createdAt: new Date().toISOString().split('T')[0]
     };
     db[cap].unshift(item);
-    saveDb();
+    try { await saveDb(); } catch (e) { return res.status(500).json({ error: '保存失败：' + e.message }); }
     res.json(item);
   });
-  app.put(`/api/${cap}/:id`, authMiddleware, (req, res) => {
+  app.put(`/api/${cap}/:id`, authMiddleware, async (req, res) => {
     const idx = db[cap].findIndex(x => x.id === req.params.id);
     if (idx < 0) return res.status(404).json({ error: '记录不存在' });
     if (req.user.role !== 'admin' && db[cap][idx].createdBy !== req.userId) {
       return res.status(403).json({ error: '无权修改他人记录' });
     }
     db[cap][idx] = { ...db[cap][idx], ...req.body };
-    saveDb();
+    try { await saveDb(); } catch (e) { return res.status(500).json({ error: '保存失败：' + e.message }); }
     res.json(db[cap][idx]);
   });
-  app.delete(`/api/${cap}/:id`, authMiddleware, (req, res) => {
+  app.delete(`/api/${cap}/:id`, authMiddleware, async (req, res) => {
     const idx = db[cap].findIndex(x => x.id === req.params.id);
     if (idx < 0) return res.status(404).json({ error: '记录不存在' });
     if (req.user.role !== 'admin' && db[cap][idx].createdBy !== req.userId) {
       return res.status(403).json({ error: '无权删除他人记录' });
     }
     db[cap].splice(idx, 1);
-    saveDb();
+    try { await saveDb(); } catch (e) { return res.status(500).json({ error: '删除失败：' + e.message }); }
     res.json({ ok: true });
   });
 }

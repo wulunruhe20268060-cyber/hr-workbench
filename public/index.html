@@ -3329,14 +3329,18 @@ function fileToBase64(file) {
 
 async function aiParseAll() {
   if (!recruitAIState.batch.length) { showToast('请先上传简历'); return; }
+  const jobId = val('rs_job');
+  const job = recruitAIState.jobs.find(j => j.id === jobId);
+  let n = 0;
   for (let i=0;i<recruitAIState.batch.length;i++) {
     const item = recruitAIState.batch[i];
     if (item.parsed || item.extracting || !item.text || !item.text.trim()) continue;
     const r = await aiGen('/api/ai/parse-resume', { text: item.text }, null);
     if (r) item.parsed = r;
+    if (item.parsed) { await autoSaveCandidate(item, job); n++; }
     renderResumeParse();
   }
-  showToast('全部解析完成');
+  showToast(n ? ('解析完成，已自动存入候选人库（' + n + ' 位）') : '全部解析完成');
 }
 
 async function aiMatchAll() {
@@ -3371,15 +3375,16 @@ async function saveAllCandidates() {
   for (let i=0;i<recruitAIState.batch.length;i++) {
     const item = recruitAIState.batch[i];
     if (!item.parsed) continue;
+    const b = item.parsed.basic || {};
     const c = {
-      name: val('rb_'+i+'_name') || item.parsed.basic?.name || '未命名',
-      position: val('rb_'+i+'_apply') || (job?job.position:''),
+      name: val('rb_'+i+'_name') || b.name || '未命名',
+      position: val('rb_'+i+'_apply') || b.applyPosition || (job ? job.position : ''),
       parsed: {
         basic: {
-          name: val('rb_'+i+'_name'), gender: val('rb_'+i+'_gender'), age: val('rb_'+i+'_age'),
-          maritalStatus: val('rb_'+i+'_marital'), applyPosition: val('rb_'+i+'_apply'),
-          currentLocation: val('rb_'+i+'_cur'), expectedLocation: val('rb_'+i+'_exp'),
-          phone: val('rb_'+i+'_phone'), currentSalary: val('rb_'+i+'_cs'), expectedSalary: val('rb_'+i+'_es')
+          name: val('rb_'+i+'_name') || b.name, gender: val('rb_'+i+'_gender') || b.gender, age: val('rb_'+i+'_age') || b.age,
+          maritalStatus: val('rb_'+i+'_marital') || b.maritalStatus, applyPosition: val('rb_'+i+'_apply') || b.applyPosition,
+          currentLocation: val('rb_'+i+'_cur') || b.currentLocation, expectedLocation: val('rb_'+i+'_exp') || b.expectedLocation,
+          phone: val('rb_'+i+'_phone') || b.phone, currentSalary: val('rb_'+i+'_cs') || b.currentSalary, expectedSalary: val('rb_'+i+'_es') || b.expectedSalary
         },
         education: item.parsed.education||[], work: item.parsed.work||[],
         skills: item.parsed.skills||[], certificates: item.parsed.certificates||[]
@@ -3387,13 +3392,16 @@ async function saveAllCandidates() {
       matchScore: item.match?.score ?? null,
       matchDetail: item.match || null,
       anomalies: item.anomaly || null,
-      tags: []
+      tags: [],
+      sourceFile: item.fileName || ''
     };
-    await apiPost('/api/candidates', c);
-    saved++;
+    const savedItem = await upsertRecord('candidates', c, x =>
+      (x.name || '') === (c.name || '') &&
+      ((x.parsed && x.parsed.basic && x.parsed.basic.phone) || '') === (c.parsed.basic.phone || '')
+    );
+    if (savedItem) saved++;
   }
-  recruitAIState.batch = [];
-  showToast('已保存 '+saved+' 位候选人'); renderResumeParse();
+  showToast('已保存 ' + saved + ' 位候选人（已自动去重）'); renderResumeParse();
 }
 
 // ---------- 3. 面试题库 ----------
@@ -3441,20 +3449,13 @@ async function aiQuestions() {
     candidateBackground: JSON.stringify(cand.parsed||{}),
     resumeText: JSON.stringify(cand.parsed||{})
   }, document.getElementById('btnQb'));
-  if (r) { recruitAIState.questionsResult = r; recruitAIState._qbCand = cand; recruitAIState._qbJob = job; renderQuestions(); showToast('题本已生成'); }
+  if (r) { recruitAIState.questionsResult = r; recruitAIState._qbCand = cand; recruitAIState._qbJob = job; await autoSaveQuestionBank(); renderQuestions(); showToast('题本已生成并自动保存'); }
 }
 
 async function saveQuestionBank() {
-  const r = recruitAIState.questionsResult;
-  const cand = recruitAIState._qbCand, job = recruitAIState._qbJob;
-  if (!r || !cand || !job) { showToast('请先生成题本'); return; }
-  const title = cand.name + job.position + today();
-  await apiPost('/api/questionBanks', {
-    candidateId: cand.id, candidateName: cand.name,
-    position: job.position, jobSpecId: job.id,
-    title, questions: r.questions, scoreTable: r.scoreTable || []
-  });
-  recruitAIState.questionsResult = null; showToast('题本已保存：'+title); renderQuestions();
+  const saved = await autoSaveQuestionBank();
+  if (!saved) { showToast('请先生成题本'); return; }
+  recruitAIState.questionsResult = null; showToast('题本已保存'); renderQuestions();
 }
 
 // ---------- 4. 录用决策 ----------
@@ -3489,21 +3490,12 @@ async function aiDecision() {
   const r = await aiGen('/api/ai/decision', {
     candidate: cand, matchResult: cand.matchDetail, interviewScores: val('dc_scores')
   }, document.getElementById('btnDc'));
-  if (r) { recruitAIState.decisionResult = r; renderDecision(); showToast('报告已生成'); }
+  if (r) { recruitAIState.decisionResult = r; await autoSaveDecision(); renderDecision(); showToast('报告已生成并自动保存'); }
 }
 
 async function saveDecision() {
-  const r = recruitAIState.decisionResult;
-  const candId = val('dc_cand');
-  const cand = recruitAIState.candidates.find(c => c.id === candId);
-  if (!r || !cand) { showToast('请先生成报告'); return; }
-  await apiPost('/api/hiringDecisions', {
-    candidateId: candId, candidateName: cand.name,
-    position: cand.position || cand.parsed?.basic?.applyPosition || '',
-    recommendation: r.recommendation, summary: r.summary,
-    strengths: r.strengths || [], risks: r.risks || [],
-    salarySuggestion: r.salarySuggestion || {}, createdAt: today()
-  });
+  const saved = await autoSaveDecision();
+  if (!saved) { showToast('请先生成报告'); return; }
   recruitAIState.decisionResult = null; showToast('决策已保存'); renderDecision();
 }
 
@@ -3544,19 +3536,12 @@ async function aiProbation() {
     position: job.position, competencies: job.competencies || {},
     candidateResume: cand.parsed || {}, interviewFeedback: val('pb_fb')
   }, document.getElementById('btnPb'));
-  if (r) { recruitAIState.probationResult = r; recruitAIState._pbCand = cand; recruitAIState._pbJob = job; renderProbation(); showToast('目标已拆解'); }
+  if (r) { recruitAIState.probationResult = r; recruitAIState._pbCand = cand; recruitAIState._pbJob = job; await autoSaveProbation(); renderProbation(); showToast('目标已拆解并自动保存'); }
 }
 
 async function saveProbation() {
-  const r = recruitAIState.probationResult;
-  const cand = recruitAIState._pbCand, job = recruitAIState._pbJob;
-  if (!r) { showToast('请先生成目标'); return; }
-  await apiPost('/api/probations', {
-    candidateId: cand?.id || null, candidateName: cand?.name || '',
-    position: job?.position || '', jobSpecId: job?.id || null,
-    goals: r.goals || [], evalTemplate: r.evalTemplate || '', decisionAdvice: r.decisionAdvice || '',
-    createdAt: today()
-  });
+  const saved = await autoSaveProbation();
+  if (!saved) { showToast('请先生成目标'); return; }
   recruitAIState.probationResult = null; showToast('方案已保存'); renderProbation();
 }
 
@@ -3593,7 +3578,94 @@ async function renderTalentPool() {
   document.getElementById('aiSubContent').innerHTML = html;
 }
 
-// ---------- 通用：已保存记录的 查看 / 编辑 / 删除 ----------
+// ---------- AI 生成结果自动保存（去重 upsert，刷新/重部署不丢） ----------
+// 先按 matchFn 查重，已存在则 PUT 更新，否则 POST 新建。避免每次生成都产生重复记录。
+async function upsertRecord(cap, body, matchFn) {
+  try {
+    const list = await apiGet('/api/' + cap).catch(() => []);
+    const existing = (list || []).find(matchFn);
+    if (existing) {
+      await apiPut('/api/' + cap + '/' + existing.id, body);
+      return existing;
+    }
+    return await apiPost('/api/' + cap, body);
+  } catch (e) {
+    showToast('自动保存失败：' + (e.message || ''));
+    return null;
+  }
+}
+
+// 简历解析结果 → 候选人库（按 姓名+电话 去重）
+async function autoSaveCandidate(item, job) {
+  if (!item || !item.parsed) return null;
+  const b = item.parsed.basic || {};
+  const c = {
+    name: b.name || '未命名',
+    position: b.applyPosition || (job ? job.position : ''),
+    parsed: {
+      basic: b,
+      education: item.parsed.education || [],
+      work: item.parsed.work || [],
+      skills: item.parsed.skills || [],
+      certificates: item.parsed.certificates || []
+    },
+    matchScore: item.match ? (item.match.score ?? null) : null,
+    matchDetail: item.match || null,
+    anomalies: item.anomaly || null,
+    tags: [],
+    sourceFile: item.fileName || ''
+  };
+  return await upsertRecord('candidates', c, x =>
+    (x.name || '') === (c.name || '') &&
+    ((x.parsed && x.parsed.basic && x.parsed.basic.phone) || '') === (b.phone || '')
+  );
+}
+
+// 题本 → questionBanks（按 candidateId 去重）
+async function autoSaveQuestionBank() {
+  const r = recruitAIState.questionsResult;
+  const cand = recruitAIState._qbCand, job = recruitAIState._qbJob;
+  if (!r || !cand || !job) return null;
+  const title = cand.name + job.position + today();
+  const body = {
+    candidateId: cand.id, candidateName: cand.name,
+    position: job.position, jobSpecId: job.id,
+    title, questions: r.questions, scoreTable: r.scoreTable || []
+  };
+  return await upsertRecord('questionBanks', body, x => x.candidateId === cand.id);
+}
+
+// 决策 → hiringDecisions（按 candidateId 去重）
+async function autoSaveDecision() {
+  const r = recruitAIState.decisionResult;
+  const candId = val('dc_cand');
+  const cand = recruitAIState.candidates.find(c => c.id === candId);
+  if (!r || !cand) return null;
+  const body = {
+    candidateId: candId, candidateName: cand.name,
+    position: cand.position || (cand.parsed && cand.parsed.basic && cand.parsed.basic.applyPosition) || '',
+    recommendation: r.recommendation, summary: r.summary,
+    strengths: r.strengths || [], risks: r.risks || [],
+    salarySuggestion: r.salarySuggestion || {}, createdAt: today()
+  };
+  return await upsertRecord('hiringDecisions', body, x => x.candidateId === candId);
+}
+
+// 试用期 → probations（按 candidateId 去重）
+async function autoSaveProbation() {
+  const r = recruitAIState.probationResult;
+  const cand = recruitAIState._pbCand, job = recruitAIState._pbJob;
+  if (!r) return null;
+  const body = {
+    candidateId: cand ? cand.id : null, candidateName: cand ? cand.name : '',
+    position: job ? job.position : '', jobSpecId: job ? job.id : null,
+    goals: r.goals || [], evalTemplate: r.evalTemplate || '',
+    decisionAdvice: r.decisionAdvice || '', createdAt: today()
+  };
+  return await upsertRecord('probations', body, x => (cand ? x.candidateId === cand.id : false));
+}
+
+// ---------- 通用:已保存记录的 查看 / 编辑 / 删除 ----------
 const RECORD_STATE_KEY = { jobSpecs:'jobs', candidates:'candidates', questionBanks:'qb', hiringDecisions:'decisions', probations:'probations' };
 function collTitle(c){ return {jobSpecs:'岗位标准',candidates:'候选人',questionBanks:'面试题本',hiringDecisions:'录用决策',probations:'试用期方案'}[c]||c; }
 function findRecord(coll, id){ const arr = recruitAIState[RECORD_STATE_KEY[coll]||'']||[]; return arr.find(x=>x.id===id); }
