@@ -24,8 +24,8 @@ REM  Console: https://console.volcengine.com/ark
 REM  NOTE the path is /api/v3 (NOT /v1)
 REM ============================================================
 set AI_BASE_URL=https://ark.cn-beijing.volces.com/api/v3/chat/completions
-set AI_API_KEY=__PASTE_YOUR_ARK_API_KEY_HERE__
-set AI_MODEL=doubao-1-5-lite-32k-250115
+set AI_API_KEY=__PASTE_YOUR_VOLCENGINE_ARK_API_KEY__
+set AI_MODEL=doubao-seed-2-0-mini-260428
 
 REM ---- Alternative: SiliconFlow (also free quota, Qwen models) ----
 REM  Remove REM from the 3 lines below AND add REM to the 3 lines above.

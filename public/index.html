@@ -1278,7 +1278,7 @@ async function renderInterviews(interviews, positions) {
     <button class="btn btn-danger btn-sm" style="margin-left:12px" onclick="batchDeleteInterviews()">批量删除</button>
     <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="document.querySelectorAll('.row-checkbox').forEach(cb=>cb.checked=false);updateBatchDeleteBar()">取消</button>
   </div><div style="overflow-x:auto"><table class="interview-table">
-      <tr><th style="width:40px"><input type="checkbox" onchange="toggleAllRows(this)"></th><th class="sticky-col">序号</th><th class="sticky-col2">姓名</th><th>学历</th><th>性别</th><th>岗位</th><th>电话</th><th>渠道</th><th>初面</th><th>复面</th><th>面试官</th><th>结果</th>${isAdmin()?'<th>录入人</th>':''}<th>备注</th><th>操作</th></tr>
+      <tr><th style="width:40px"><input type="checkbox" onchange="toggleAllRows(this)"></th><th class="sticky-col">序号</th><th class="sticky-col2">姓名</th><th>学历</th><th>性别</th><th>岗位</th><th>电话</th><th>渠道</th><th>面试时间</th><th>入职时间</th><th>面试官</th><th>结果</th>${isAdmin()?'<th>录入人</th>':''}<th>备注</th><th>操作</th></tr>
       ${(() => { const pageData = paginate([...filtered], interviewPage, interviewPageSize); return pageData.map((iv, idx) => {
         const canModify = isAdmin() || iv.createdBy === auth.userId;
         let tag = '';
@@ -1329,7 +1329,7 @@ function showAddInterview(editId) {
     <div class="form-row"><div><label>电话</label><input id="f_phone" value=""></div><div><label>学历</label><select id="f_education"><option value="">--</option><option>博士</option><option>硕士</option><option>本科</option><option>大专</option><option>高中及以下</option></select></div></div>
     <div class="form-row"><div><label>性别</label><select id="f_gender"><option value="">--</option><option>男</option><option>女</option></select></div><div><label>邀约人</label><input id="f_inviter" value=""></div></div>
     <div class="form-row"><div><label>渠道来源</label><select id="f_source"><option value="">--</option><option>BOSS直聘</option><option>猎聘</option><option>拉勾</option><option>内推</option><option>猎头推荐</option><option>官网</option><option>校招</option><option>其他</option></select></div></div>
-    <div class="form-row"><div><label>初面时间</label><input type="date" id="f_date1" value="${iv.firstInterviewDate}"></div><div><label>复面时间</label><input type="date" id="f_date2"></div></div>
+    <div class="form-row"><div><label>面试时间</label><input type="date" id="f_date1" value="${iv.firstInterviewDate}"></div><div><label>入职时间</label><input type="date" id="f_date2"></div></div>
     <div class="form-row"><div><label>面试官</label><input id="f_interviewer" value=""></div><div><label>面试结果</label><select id="f_result"><option>待面试</option><option>通过</option><option>待定</option><option>淘汰</option></select></div></div>
     <div class="form-row"><div><label>拟入职时间</label><input type="date" id="f_onboardDate"></div></div>
     <div><label>备注</label><textarea id="f_notes" placeholder="记录面试评价或其他补充信息..."></textarea></div>
@@ -1412,7 +1412,7 @@ function showBatchImport() {
     <h3>批量粘贴导入</h3>
     <p style="font-size:13px;color:var(--text2);margin-bottom:8px">
       每行一条，用 <code>|</code> 分隔：<br>
-      <code>姓名 | 岗位 | 电话 | 学历 | 性别 | 邀约人 | 渠道 | 初面时间 | 复面时间 | 面试官 | 结果 | 拟入职时间 | 备注</code><br>
+      <code>姓名 | 岗位 | 电话 | 学历 | 性别 | 邀约人 | 渠道 | 面试时间 | 入职时间 | 面试官 | 结果 | 拟入职时间 | 备注</code><br>
       最少填姓名，其他可空
     </p>
     <textarea id="f_batch" placeholder="张三 | 前端开发 | 13800138000 | 本科 | 男 | 李主管 | BOSS直聘 | 2026-08-03 |  | 李主管 | 待面试 |  | 5年经验&#10;李四 | 产品经理 | 13900139000 | 硕士 | 女 | 王总 | 内推 | 2026-08-04 | 2026-08-10 | 王总监 | 待面试 | 2026-08-20 | " style="min-height:140px"></textarea>
@@ -1456,7 +1456,7 @@ async function exportInterviews() {
     const interviews = await apiGet('/api/interviews');
     if (interviews.length === 0) { showToast('暂无数据可导出'); return; }
     const BOM = '\uFEFF';
-    const headers = '姓名,岗位,电话,学历,性别,邀约人,渠道来源,初面时间,复面时间,面试官,面试结果,拟入职时间,备注';
+    const headers = '姓名,岗位,电话,学历,性别,邀约人,渠道来源,面试时间,入职时间,面试官,面试结果,拟入职时间,备注';
     const rows = interviews.map(iv => [
       iv.name, iv.position, iv.phone, iv.education||'', iv.gender||'', iv.inviter||'',
       iv.source||'', iv.firstInterviewDate||'', iv.secondInterviewDate||'',
@@ -1495,7 +1495,7 @@ function downloadBlob(content, filename, mimeType) {
 function downloadInterviewTemplate() {
   // CSV template with BOM so Excel opens correctly with Chinese
   const BOM = '\uFEFF';
-  const headers = '姓名,岗位,电话,学历,性别,邀约人,渠道来源,初面时间,复面时间,面试官,面试结果,拟入职时间,备注';
+  const headers = '姓名,岗位,电话,学历,性别,邀约人,渠道来源,面试时间,入职时间,面试官,面试结果,拟入职时间,备注';
   const sample = '张三,前端开发,13800138000,本科,男,李主管,BOSS直聘,2026-08-03,,李主管,待面试,,5年React经验';
   const csv = BOM + headers + '\n' + sample + '\n';
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -1520,8 +1520,8 @@ async function handleInterviewCSVUpload(event) {
     position: r['岗位'] || r['position'] || '',
     phone: r['电话'] || r['phone'] || '',
     source: r['渠道来源'] || r['渠道'] || r['source'] || '',
-    firstInterviewDate: r['初面时间'] || r['firstInterviewDate'] || '',
-    secondInterviewDate: r['复面时间'] || r['secondInterviewDate'] || '',
+    firstInterviewDate: r['面试时间'] || r['初面时间'] || r['firstInterviewDate'] || '',
+    secondInterviewDate: r['入职时间'] || r['复面时间'] || r['secondInterviewDate'] || '',
     interviewer: r['面试官'] || r['interviewer'] || '',
     result: r['面试结果'] || r['结果'] || r['result'] || '待面试',
     expectedOnboardDate: r['拟入职时间'] || r['expectedOnboardDate'] || '',
@@ -2425,7 +2425,7 @@ function renderProgress(progress) {
       <td style="font-weight:600;color:var(--primary)">${p.totalEntry||0}</td>
       <td style="color:${(p.shortage||0)>0?'var(--danger)':'var(--success)'};font-weight:600">${p.shortage||0}</td>
       <td style="font-weight:600">${p.completion||'0%'}</td>
-      <td class="row-note"><input value="${escapeHtml(p.note||p.notes||'')}" onchange="markDirty('${p.id}','note',this.value)" placeholder="说明"></td>
+      <td class="row-note"><input value="${escapeHtml(p.note||p.notes||'')}" onchange="markDirty('${p.id}','note',this.value)" placeholder="说明">${(p.attrition||0)>0?`<div style="color:var(--danger);font-size:11px;margin-top:3px;font-weight:600">流失 ${p.attrition} 人</div>`:''}</td>
       ${canEdit?`<td><button class="btn btn-danger btn-xs" onclick="deleteProgress('${p.id}')">删除</button></td>`:''}
     </tr>`;
   });

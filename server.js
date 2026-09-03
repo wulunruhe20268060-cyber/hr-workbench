@@ -612,7 +612,7 @@ app.post('/api/interviews', authMiddleware, (req, res) => {
     createdAt: new Date().toISOString().split('T')[0]
   };
   db.interviews.unshift(iv);
-  saveDb();
+  syncRecruitFromInterviews();
   res.json(iv);
 });
 
@@ -627,7 +627,7 @@ app.post('/api/interviews/batch', authMiddleware, (req, res) => {
     createdBy: req.userId, createdAt: now
   }));
   db.interviews.unshift(...added);
-  saveDb();
+  syncRecruitFromInterviews();
   res.json({ count: added.length });
 });
 
@@ -660,7 +660,7 @@ app.post('/api/interviews/batch-upsert', authMiddleware, (req, res) => {
       added++;
     }
   });
-  saveDb();
+  syncRecruitFromInterviews();
   res.json({ added, updated });
 });
 
@@ -671,11 +671,8 @@ app.put('/api/interviews/:id', authMiddleware, (req, res) => {
     return res.status(403).json({ error: '无权修改他人记录' });
   }
   db.interviews[idx] = { ...db.interviews[idx], ...req.body };
-  // Auto-sync to progress table if result changed to "通过"
-  if (req.body.result === '通过') {
-    syncProgressFromInterview(db.interviews[idx]);
-  }
-  saveDb();
+  // 以面试记录为源头重算招聘进度 / 看板 / 新人随访
+  syncRecruitFromInterviews();
   res.json(db.interviews[idx]);
 });
 
@@ -686,7 +683,7 @@ app.delete('/api/interviews/:id', authMiddleware, (req, res) => {
     return res.status(403).json({ error: '无权删除他人记录' });
   }
   db.interviews = db.interviews.filter(iv => iv.id !== req.params.id);
-  saveDb();
+  syncRecruitFromInterviews();
   res.json({ ok: true });
 });
 
@@ -699,7 +696,7 @@ app.post('/api/interviews/batch-delete', authMiddleware, (req, res) => {
   } else {
     db.interviews = db.interviews.filter(iv => !ids.includes(iv.id) || iv.createdBy !== req.userId);
   }
-  saveDb();
+  syncRecruitFromInterviews();
   res.json({ ok: true, removed: before - db.interviews.length });
 });
 
@@ -926,6 +923,135 @@ function syncProgressFromInterview(interview) {
   }
 }
 
+// ========== 招聘联动：面试 → 招聘进度 / 招聘看板 / 新人随访 ==========
+const SALES_POSITIONS = ['软件销售', '财税销售', '财税顾问'];
+const DEPART_KEYWORDS = ['离职', '辞职', '自离', '劝退', '解聘', '离任', '开除'];
+
+function hasOnboardDate(iv) {
+  const d = (iv && iv.secondInterviewDate || '').toString().trim();
+  return d !== '' && d !== '-' && d !== '待定' && d !== '无';
+}
+function isOnboarded(iv) {
+  // 有入职时间且未被淘汰，视为已入职
+  return hasOnboardDate(iv) && (iv.result || '') !== '淘汰';
+}
+function isDeparted(iv) {
+  const notes = (iv && iv.notes || '').toString();
+  return DEPART_KEYWORDS.some(k => notes.includes(k));
+}
+function weekOfMonth(dateStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((dateStr || '').trim());
+  if (!m) return 0;
+  const day = parseInt(m[3], 10);
+  if (!day) return 0;
+  const wk = Math.ceil(day / 7);
+  return wk >= 1 && wk <= 4 ? wk : (wk > 4 ? 4 : 0);
+}
+// 按岗位访谈模板生成第1天→第3个月的随访周期（无岗位专属模板则轮换使用全部模板）
+function buildProbationPeriods(positionName) {
+  const pool = (db.templates || []).filter(t => (t.name || '').includes(positionName));
+  const tpls = pool.length ? pool : (db.templates || []);
+  const schedule = ['第1天', '第1周', '第2周', '第1个月', '第2个月', '第3个月'];
+  return schedule.map((name, i) => {
+    const t = tpls.length ? tpls[i % tpls.length] : null;
+    return {
+      id: genId(), name,
+      templateId: t ? t.id : '',
+      questions: t ? [...(t.questions || [])] : [],
+      checkins: []
+    };
+  });
+}
+function upsertFollowUp(iv) {
+  const existing = db.hires.find(h => h.name === iv.name && h.position === iv.position);
+  const entryDate = iv.secondInterviewDate;
+  const dept = (db.positions.find(p => p.position === iv.position) || {}).dept || '';
+  if (existing) {
+    if (existing.entryDate !== entryDate || existing.createdBy !== iv.createdBy) {
+      existing.entryDate = entryDate;
+      existing.createdBy = iv.createdBy; // 录入人沿用面试记录的录入人
+      saveDb();
+    }
+    return;
+  }
+  db.hires.unshift({
+    id: genId(), name: iv.name, position: iv.position, dept,
+    entryDate, periods: buildProbationPeriods(iv.position),
+    createdBy: iv.createdBy, createdAt: new Date().toISOString().split('T')[0]
+  });
+  saveDb();
+}
+function syncFollowUpFromInterviews() {
+  db.interviews.forEach(iv => {
+    if (!iv.position) return;
+    if (!SALES_POSITIONS.some(s => (iv.position || '').includes(s))) return;
+    if (!isOnboarded(iv)) return;
+    upsertFollowUp(iv);
+  });
+}
+// 以面试记录为源头，重算招聘进度、招聘看板、新人随访
+function syncRecruitFromInterviews() {
+  const map = {};
+  db.interviews.forEach(iv => {
+    if (!iv.position) return;
+    const o = map[iv.position] || (map[iv.position] = { week1: 0, week2: 0, week3: 0, week4: 0, attrition: 0, onboarded: 0 });
+    // 曾入职但备注含离职 → 计入流失并核减入职人数（不参与周次统计）
+    if (isDeparted(iv) && hasOnboardDate(iv)) {
+      o.attrition++;
+    } else if (isOnboarded(iv)) {
+      o.onboarded++;
+      const wk = weekOfMonth(iv.secondInterviewDate);
+      if (wk >= 1 && wk <= 4) o['week' + wk]++;
+    }
+  });
+  // 仅对"有入职数据"的岗位重算周次（无入职数据的岗位保留手动填写）
+  db.progress.forEach(p => {
+    const o = map[p.position];
+    if (!o || o.onboarded === 0) return;
+    p.week1 = o.week1; p.week2 = o.week2; p.week3 = o.week3; p.week4 = o.week4;
+    p.attrition = o.attrition;
+    p.totalEntry = p.week1 + p.week2 + p.week3 + p.week4;
+    p.shortage = Math.max(0, (p.headcount || 0) - p.totalEntry);
+    p.completion = p.headcount > 0 ? Math.round(p.totalEntry / p.headcount * 100) + '%' : '0%';
+  });
+  // 有入职人员但招聘进度表无该岗位行 → 自动补建
+  Object.keys(map).forEach(pos => {
+    const o = map[pos];
+    if (o.onboarded > 0 && !db.progress.find(p => p.position === pos)) {
+      const posRow = db.positions.find(x => x.position === pos);
+      const hc = posRow ? (posRow.headcount || 0) : 0;
+      db.progress.push({
+        id: genId(), position: pos, headcount: hc, priority: '中', urgency: '中', difficulty: '中',
+        planNode: '', week1: o.week1, week2: o.week2, week3: o.week3, week4: o.week4,
+        totalEntry: o.onboarded, shortage: Math.max(0, hc - o.onboarded),
+        completion: hc > 0 ? Math.round(o.onboarded / hc * 100) + '%' : '0%',
+        attrition: o.attrition, notes: '', createdBy: 'system', createdAt: new Date().toISOString().split('T')[0]
+      });
+    }
+  });
+  // 有入职人员但招聘看板无该岗位行 → 自动补建，保证看板同步
+  Object.keys(map).forEach(pos => {
+    const o = map[pos];
+    if (o.onboarded > 0 && !db.positions.find(p => p.position === pos)) {
+      db.positions.unshift({
+        id: genId(), position: pos, dept: '',
+        headcount: (db.progress.find(p => p.position === pos) || {}).headcount || 0,
+        deadline: '',
+        stages: { resumeScreen: 0, firstInterview: 0, secondInterview: 0, finalInterview: 0, offer: 0, onboard: o.onboarded },
+        status: 'active', createdBy: 'system', createdAt: new Date().toISOString().split('T')[0]
+      });
+    }
+  });
+  // 同步招聘看板（岗位漏斗的已入职）
+  db.positions.forEach(pos => {
+    const o = map[pos.position] || { onboarded: 0 };
+    pos.stages = pos.stages || {};
+    pos.stages.onboard = o.onboarded || 0;
+  });
+  syncFollowUpFromInterviews();
+  saveDb();
+}
+
 app.get('/api/hires', authMiddleware, (req, res) => {
   res.json(filterByUser(db.hires, req.userId, req.user.role));
 });
@@ -1017,19 +1143,8 @@ app.get('/api/progress', authMiddleware, (req, res) => {
 });
 
 app.post('/api/progress/sync', authMiddleware, adminOnly, (req, res) => {
-  // Auto-sync: recalculate all progress from interview data
-  db.progress.forEach(p => {
-    p.week1 = 0; p.week2 = 0; p.week3 = 0; p.week4 = 0;
-    db.interviews.filter(iv => iv.result === '通过' && iv.position === p.position).forEach(iv => {
-      const d = new Date(iv.interviewDate).getDate();
-      const wk = Math.ceil(d / 7);
-      if (wk >= 1 && wk <= 4) p['week' + wk] = (p['week' + wk] || 0) + 1;
-    });
-    p.totalEntry = (p.week1||0) + (p.week2||0) + (p.week3||0) + (p.week4||0);
-    p.shortage = Math.max(0, (p.headcount||0) - p.totalEntry);
-    p.completion = p.headcount > 0 ? Math.round(p.totalEntry / p.headcount * 100) + '%' : '0%';
-  });
-  saveDb();
+  // 以面试记录为源头，重算招聘进度 / 招聘看板 / 新人随访
+  syncRecruitFromInterviews();
   res.json({ ok: true, count: db.progress.length });
 });
 
