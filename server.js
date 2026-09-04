@@ -34,7 +34,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.disable('etag');
 
 // ========== Database ==========
-let db = { users: [], positions: [], interviews: [], todos: [], templates: [], hires: [], progress: [], contracts: [], jobSpecs: [], candidates: [], questionBanks: [], hiringDecisions: [], probations: [] };
+let db = { users: [], positions: [], interviews: [], todos: [], templates: [], hires: [], progress: [], contracts: [], jobSpecs: [], candidates: [], questionBanks: [], hiringDecisions: [], probations: [], boardHistory: [] };
 let tokens = {};
 
 // ---- Postgres (optional): used when DATABASE_URL is set, else falls back to JSON file ----
@@ -1039,11 +1039,14 @@ function healHirePeriods(h) {
 function upsertFollowUp(iv) {
   const entryDate = iv.secondInterviewDate;
   const dept = (db.positions.find(p => p.position === iv.position) || {}).dept || '';
+  // 归属人 = 面试管理的邀约人（inviter 为姓名文本）；邀约人为空时保留原归属/录入人
+  const owner = (iv.inviter || '').toString().trim();
   const existing = db.hires.find(h => h.name === iv.name && h.position === iv.position);
   if (existing) {
     let changed = false;
     if (existing.entryDate !== entryDate) { existing.entryDate = entryDate; changed = true; }
     if (existing.createdBy !== iv.createdBy) { existing.createdBy = iv.createdBy; changed = true; }
+    if (owner && existing.owner !== owner) { existing.owner = owner; changed = true; }
     if (!existing.dept && dept) { existing.dept = dept; changed = true; }
     if (healHirePeriods(existing)) changed = true;
     if (changed) saveDb();
@@ -1052,7 +1055,7 @@ function upsertFollowUp(iv) {
   db.hires.unshift({
     id: genId(), name: iv.name, position: iv.position, dept,
     entryDate, periods: buildProbationPeriods(iv.position),
-    createdBy: iv.createdBy, source: 'interview',
+    createdBy: iv.createdBy, owner, source: 'interview',
     createdAt: new Date().toISOString().split('T')[0]
   });
   saveDb();
@@ -1148,6 +1151,8 @@ app.post('/api/hires', authMiddleware, (req, res) => {
   const hire = {
     id: genId(), ...req.body,
     periods: req.body.periods || [],
+    // 归属人：优先取前端传入(邀约人)；为空时回退当前登录成员姓名，便于手动建档也有归属
+    owner: (req.body.owner || '').toString().trim() || (req.user.displayName || req.user.username || ''),
     createdBy: req.userId,
     createdAt: new Date().toISOString().split('T')[0]
   };
@@ -1234,6 +1239,67 @@ app.post('/api/progress/sync', authMiddleware, adminOnly, (req, res) => {
   // 以面试记录为源头，重算招聘进度 / 招聘看板 / 新人随访
   syncRecruitFromInterviews();
   res.json({ ok: true, count: db.progress.length });
+});
+
+// ========== 招聘看板历史归档（每月1号自动归档上月快照）==========
+// 归档 = 把当月招聘看板各岗位漏斗(stages)快照存入 boardHistory[month]，只读回溯。
+function monthStr(y, m) { return y + '-' + String(m).padStart(2, '0'); }
+function prevMonthStr(d) {
+  const date = d instanceof Date ? d : new Date();
+  let y = date.getFullYear(), m = date.getMonth() + 1;
+  m -= 1; if (m < 1) { m = 12; y -= 1; }
+  return monthStr(y, m);
+}
+// 生成某岗位集的看板快照（仅保留展示与统计所需字段）
+function boardSnapshotOf(list) {
+  return (list || []).map(p => ({
+    position: p.position, dept: p.dept || '', headcount: p.headcount || 0,
+    deadline: p.deadline || '', status: p.status || 'active',
+    stages: { resumeScreen: (p.stages && p.stages.resumeScreen) || 0, firstInterview: (p.stages && p.stages.firstInterview) || 0, secondInterview: (p.stages && p.stages.secondInterview) || 0, finalInterview: (p.stages && p.stages.finalInterview) || 0, offer: (p.stages && p.stages.offer) || 0, onboard: (p.stages && p.stages.onboard) || 0 }
+  }));
+}
+// 归档指定月份(YYYY-MM)。幂等：同月已有记录则跳过不覆盖。
+function archiveBoardSnapshot(month) {
+  if (!month) return { archived: false, existed: false, month: null, reason: 'no-month' };
+  if (!Array.isArray(db.boardHistory)) db.boardHistory = [];
+  if (db.boardHistory.some(h => h.month === month)) return { archived: false, existed: true, month };
+  db.boardHistory.unshift({
+    id: genId(), month,
+    archivedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+    snapshot: boardSnapshotOf(db.positions)
+  });
+  saveDb();
+  return { archived: true, existed: false, month, positions: db.positions.length };
+}
+// 每月1号启动时归档上个月的看板结果
+function maybeAutoArchiveBoard() {
+  const now = new Date();
+  if (now.getDate() !== 1) return { auto: false, reason: 'not-1st', month: prevMonthStr(now) };
+  const r = archiveBoardSnapshot(prevMonthStr(now));
+  console.log(r.archived ? `boot: archived board snapshot for ${r.month}` : (r.existed ? `boot: board snapshot for ${r.month} already exists` : `boot: no board archive for ${r.month}`));
+  return { auto: true, ...r };
+}
+
+app.get('/api/board-history', authMiddleware, (req, res) => {
+  res.json((db.boardHistory || []).map(h => ({
+    id: h.id, month: h.month, archivedAt: h.archivedAt, positionCount: (h.snapshot || []).length,
+    snapshot: h.snapshot || []
+  })));
+});
+app.post('/api/board-history/archive', authMiddleware, adminOnly, (req, res) => {
+  // 手动归档指定月份；不传 month 默认归档上月
+  const month = (req.body && req.body.month) || prevMonthStr(new Date());
+  const r = archiveBoardSnapshot(month);
+  if (!r.archived && !r.existed) return res.status(400).json({ error: '归档失败：' + (r.reason || '未知原因') });
+  res.json(r);
+});
+app.delete('/api/board-history/:month', authMiddleware, adminOnly, (req, res) => {
+  // 删除某月归档（便于修正后重新归档）
+  const before = (db.boardHistory || []).length;
+  db.boardHistory = (db.boardHistory || []).filter(h => h.month !== req.params.month);
+  if (db.boardHistory.length === before) return res.status(404).json({ error: '该月份无归档记录' });
+  saveDb();
+  res.json({ ok: true, removed: req.params.month });
 });
 
 app.post('/api/progress', authMiddleware, adminOnly, (req, res) => {
@@ -1845,7 +1911,7 @@ app.get('*', (req, res) => {
   await initStore();
   if (!db.contracts) db.contracts = [];
   // Ensure newly-added collections exist even when loading an older db.json
-  ['jobSpecs', 'candidates', 'questionBanks', 'hiringDecisions', 'probations'].forEach(k => { if (!db[k]) db[k] = []; });
+  ['jobSpecs', 'candidates', 'questionBanks', 'hiringDecisions', 'probations', 'boardHistory'].forEach(k => { if (!db[k]) db[k] = []; });
   // Seed a demo job spec once (so the module is usable immediately on existing DBs)
   if (db.jobSpecs.length === 0) {
     const now = new Date().toISOString().split('T')[0];
@@ -1878,6 +1944,17 @@ app.get('*', (req, res) => {
       console.log('boot: recruit-linkage auto-sync done (heal follow-ups / attrition)');
     } catch (e) { console.error('boot: recruit-linkage auto-sync error:', e.message); }
   }
+  // 归属人回填：新版本上线后，把存量销售岗随访的 owner 补齐为面试邀约人（只跑一次）
+  if (!bootFreshSeed && !db._ownerAutoSyncDone) {
+    try {
+      syncFollowUpFromInterviews();
+      db._ownerAutoSyncDone = true;
+      await saveDb();
+      console.log('boot: follow-up owner backfill done (owner = interview inviter)');
+    } catch (e) { console.error('boot: follow-up owner backfill error:', e.message); }
+  }
+  // 每月1号启动时自动归档上个月的招聘看板快照（幂等，不影响既有归档）
+  try { maybeAutoArchiveBoard(); } catch (e) { console.error('boot: board auto-archive error:', e.message); }
   // 若本次从文件存储迁移了数据到 Postgres，立即落库，确保不丢失
   if (migratedFromFile) {
     try { await saveDb(); console.log('Migrated existing file data into Postgres (persisted)'); }

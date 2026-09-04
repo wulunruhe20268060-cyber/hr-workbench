@@ -1042,7 +1042,9 @@ function renderTeamOverview(positions, interviews, todos, hires, users) {
 }
 
 // ==================== Module 0: Recruitment Board ====================
-async function renderBoard(positions) {
+let boardHistoryCache = [];
+async function renderBoard(positions, boardHistory) {
+  boardHistoryCache = boardHistory || [];
   let html = '';
   const canEdit = isAdmin();
   
@@ -1105,7 +1107,71 @@ async function renderBoard(positions) {
     html += `</table></div>`;
   }
   html += `</div>`;
+
+  // ===== 历史看板（每月1号自动归档上月快照，可手动归档/回溯/删除重存）=====
+  const hist = boardHistoryCache;
+  html += `<div class="card"><div class="card-header"><h2>历史看板</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${canEdit ? `<button class="btn btn-warning btn-sm" onclick="archiveBoard()">归档上月</button>` : ''}
+        ${hist.length > 0 ? `<select id="histMonth" onchange="renderBoardHistory(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+          ${hist.map(h => `<option value="${h.month}">${h.month} 归档</option>`).join('')}
+        </select>` : ''}
+        ${canEdit && hist.length > 0 ? `<button class="btn btn-danger btn-sm" onclick="deleteBoardArchive()">删除当前月份归档</button>` : ''}
+      </div>
+    </div>
+    <div id="boardHistoryDetail">${hist.length ? '<div style="text-align:center;color:var(--text2);padding:14px">请选择月份查看归档快照</div>' : `<div style="text-align:center;color:var(--text2);padding:14px">暂无历史归档。每月 1 号系统会自动归档上个月的看板；管理员也可点「归档上月」立即保存。</div>`}</div>
+  </div>`;
+
   document.getElementById('moduleContent').innerHTML = html;
+  if (hist.length) {
+    // 默认选中最近一次归档并展示
+    const sel = document.getElementById('histMonth');
+    if (sel) renderBoardHistory(sel.value);
+  }
+}
+
+async function archiveBoard() {
+  try {
+    const r = await apiPost('/api/board-history/archive', {});
+    showToast(r.existed ? `${r.month} 已有归档，未重复保存` : `${r.month} 看板已归档（${r.positions||0} 个岗位）`);
+    await render();
+  } catch(e) { showToast(e.message); }
+}
+async function deleteBoardArchive() {
+  const sel = document.getElementById('histMonth');
+  if (!sel) return;
+  const month = sel.value;
+  if (!confirm(`确定删除 ${month} 的历史看板归档？删除后可重新归档该月。`)) return;
+  try {
+    await apiDelete('/api/board-history/' + encodeURIComponent(month));
+    showToast(month + ' 归档已删除');
+    await render();
+  } catch(e) { showToast(e.message); }
+}
+function renderBoardHistory(month) {
+  const wrap = document.getElementById('boardHistoryDetail');
+  if (!wrap) return;
+  const h = boardHistoryCache.find(x => x.month === month);
+  if (!h) { wrap.innerHTML = '<div style="text-align:center;color:var(--text2);padding:14px">该月份无归档数据</div>'; return; }
+  const snap = h.snapshot || [];
+  const stageKeys = ['resumeScreen','firstInterview','secondInterview','finalInterview','offer','onboard'];
+  const stageLabels = ['简历筛选','初面','复试','终面','Offer','入职'];
+  const sum = {}; stageKeys.forEach(k => sum[k] = 0);
+  snap.forEach(p => stageKeys.forEach(k => sum[k] += (p.stages && p.stages[k]) || 0));
+  const total = stageKeys.reduce((a,k)=>a+sum[k],0);
+  if (snap.length === 0) { wrap.innerHTML = '<div style="text-align:center;color:var(--text2);padding:14px">该月归档无岗位数据</div>'; return; }
+  let t = `<div style="margin-bottom:10px;font-size:13px;color:var(--text2)">归档时间：${escapeHtml(h.archivedAt||'')} ｜ ${snap.length} 个岗位 ｜ 管道合计 ${total} 人</div>
+    <div class="board-columns">${stageLabels.map((lb,i)=>`<div class="board-col"><div class="board-col-header">${lb}</div><div class="board-col-count">${sum[stageKeys[i]]}</div></div>`).join('')}</div>
+    <div style="overflow-x:auto;margin-top:10px"><table class="pos-table">
+      <tr><th>岗位</th><th>部门</th><th>需求</th><th>截止</th><th>简历</th><th>初面</th><th>复试</th><th>终面</th><th>Offer</th><th>入职</th></tr>`;
+  snap.forEach(p => {
+    const st = p.stages || {};
+    t += `<tr><td><strong>${escapeHtml(p.position)}</strong></td><td>${escapeHtml(p.dept||'')}</td><td>${p.headcount||0}</td><td>${p.deadline||'-'}</td>
+      <td>${st.resumeScreen||0}</td><td>${st.firstInterview||0}</td><td>${st.secondInterview||0}</td><td>${st.finalInterview||0}</td><td>${st.offer||0}</td>
+      <td><strong style="color:var(--primary)">${st.onboard||0}</strong></td></tr>`;
+  });
+  t += `</table></div>`;
+  wrap.innerHTML = t;
 }
 
 let batchEditMode = false;
@@ -1831,11 +1897,12 @@ function renderFollowUp(hires, templates) {
       const canModify = isAdmin() || h.createdBy === auth.userId;
       const periods = h.periods || [];
       const totalCheckins = periods.reduce((sum,p) => sum + (p.checkins||[]).length, 0);
+      const ownerName = (h.owner || '').toString().trim() || userMap[h.createdBy] || '';
       
       return `<div class="hire-card">
         <div class="hire-card-header">
           <div>
-            <h4>${escapeHtml(h.name)} ${isAdmin()&&h.createdBy!==auth.userId?`<span class="creator-tag">${userMap[h.createdBy]||''}</span>`:''}</h4>
+            <h4>${escapeHtml(h.name)} ${ownerName?`<span class="creator-tag">归属:${escapeHtml(ownerName)}</span>`:''}</h4>
             <div class="hire-meta">${escapeHtml(h.position)} | ${escapeHtml(h.dept)} | 入职:${h.entryDate} | ${periods.length}个周期 | ${totalCheckins}次随访</div>
           </div>
           <div style="display:flex;gap:4px;flex-wrap:wrap">
@@ -2211,6 +2278,7 @@ function showAddHire(editId) {
     <h3>${editId?'编辑':'添加'}新人</h3>
     <div class="form-row"><div><label>姓名 *</label><input id="f_hname"></div><div><label>岗位</label><input id="f_hpos"></div></div>
     <div class="form-row"><div><label>部门</label><input id="f_hdept"></div><div><label>入职日期</label><input type="date" id="f_hedate" value="${today()}"></div></div>
+    <div class="form-row"><div><label>归属人（邀约人/负责人）</label><input id="f_howner" placeholder="如：张主管"></div></div>
     <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="saveHire('${editId||''}')">${editId?'保存':'添加'}</button></div>
   `);
   if (editId) {
@@ -2223,6 +2291,7 @@ function showAddHire(editId) {
           document.getElementById('f_hpos').value = found.position||'';
           document.getElementById('f_hdept').value = found.dept||'';
           document.getElementById('f_hedate').value = found.entryDate||today();
+          document.getElementById('f_howner').value = found.owner||'';
         }
       } catch(e) {}
     })();
@@ -2232,7 +2301,7 @@ function showAddHire(editId) {
 async function saveHire(editId) {
   const name = document.getElementById('f_hname').value.trim();
   if (!name) { showToast('请输入姓名'); return; }
-  const data = { name, position: document.getElementById('f_hpos').value.trim(), dept: document.getElementById('f_hdept').value.trim(), entryDate: document.getElementById('f_hedate').value };
+  const data = { name, position: document.getElementById('f_hpos').value.trim(), dept: document.getElementById('f_hdept').value.trim(), entryDate: document.getElementById('f_hedate').value, owner: document.getElementById('f_howner').value.trim() };
   try {
     if (editId) { await apiPut('/api/hires/'+editId, data); }
     else { await apiPost('/api/hires', data); }
@@ -3014,9 +3083,10 @@ function closeModal() { if (modalOverlay) { modalOverlay.remove(); modalOverlay=
 // ==================== Render ====================
 async function render() {
   try {
-    const [positions, interviews, todos, templates, hires] = await Promise.all([
+    const [positions, interviews, todos, templates, hires, boardHistory] = await Promise.all([
       apiGet('/api/positions'), apiGet('/api/interviews'), apiGet('/api/todos'),
-      apiGet('/api/templates'), apiGet('/api/hires')
+      apiGet('/api/templates'), apiGet('/api/hires'),
+      apiGet('/api/board-history').catch(() => [])
     ]);
     let users = [];
     let progress = [];
@@ -3032,7 +3102,7 @@ async function render() {
     renderTeamOverview(positions, interviews, todos, hires, users);
     
     switch(currentTab) {
-      case 0: await renderBoard(positions); break;
+      case 0: await renderBoard(positions, boardHistory); break;
       case 1: await renderInterviews(interviews, positions); break;
       case 2: await renderTodos(todos); break;
       case 3: renderFollowUp(hires, templates); break;
