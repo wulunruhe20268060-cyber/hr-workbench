@@ -2427,8 +2427,10 @@ async function exportHire(hireId) {
   } catch (e) { showToast(e.message); }
 }
 
-let progressYear = 2026;
-let progressMonth = 8;
+// 招聘进度表默认显示当前月（不同月份的入职/流失数据按月隔离，不混合）
+let progressYear = new Date().getFullYear();
+let progressMonth = new Date().getMonth() + 1;
+function progressMonthStr() { return progressYear + '-' + String(progressMonth).padStart(2, '0'); }
 
 function renderProgress(progress) {
   let html = '';
@@ -2468,6 +2470,12 @@ function renderProgress(progress) {
   const totalEntry = totalW1+totalW2+totalW3+totalW4;
   const totalShortage = Math.max(0, totalHeadcount - totalEntry);
   const totalCompletion = totalHeadcount>0 ? Math.round(totalEntry/totalHeadcount*100)+'%' : '0%';
+  
+  if (progress.length === 0) {
+    html += `<div style="text-align:center;color:var(--text2);padding:22px">${progressYear} 年 ${progressMonth} 月暂无招聘进度数据${canEdit?'，可点击右上角「新增岗位」录入本月计划，或点「从面试同步」自动带入本月的入职/离职数据':''}</div></div>`;
+    document.getElementById('moduleContent').innerHTML = html;
+    return;
+  }
   
   html += `<div style="overflow-x:auto"><table class="progress-table">
     <tr>
@@ -2538,8 +2546,8 @@ async function saveAllProgress() {
 async function syncProgress() {
   if (!isAdmin()) { showToast('仅管理员可操作'); return; }
   try {
-    await apiPost('/api/progress/sync');
-    await render(); showToast('已从面试数据同步进度');
+    const r = await apiPost('/api/progress/sync', { month: progressMonthStr() });
+    await render(); showToast(`已从面试数据同步 ${r.month||progressMonthStr()} 的进度（只统计该月入职/离职）`);
   } catch(e) { showToast('同步失败'); }
 }
 
@@ -2561,6 +2569,7 @@ async function saveProgressNew() {
   try {
     await apiPost('/api/progress', {
       position: pos, headcount: parseInt(document.getElementById('fp_hc').value)||1,
+      month: progressMonthStr(),
       priority: document.getElementById('fp_pri').value,
       urgency: document.getElementById('fp_urg').value,
       difficulty: document.getElementById('fp_diff').value,
@@ -2569,7 +2578,7 @@ async function saveProgressNew() {
       shortage: parseInt(document.getElementById('fp_hc').value)||1,
       completion:'0%',notes:''
     });
-    closeModal(); await render(); showToast('已添加');
+    closeModal(); await render(); showToast(`已添加到 ${progressMonthStr()}`);
   } catch(e) { showToast(e.message); }
 }
 
@@ -2694,10 +2703,10 @@ async function handleProgressUpload(event) {
     showToast(`未找到有效岗位数据。检测到的表头：${hdrKeys}`);
     return;
   }
-  if (!confirm(`解析到 ${items.length} 条数据，确认导入并覆盖同名岗位？`)) return;
+  if (!confirm(`解析到 ${items.length} 条数据，确认导入 ${progressMonthStr()} 并覆盖该月同名岗位？`)) return;
   
   try {
-    const result = await apiPost('/api/progress/batch-import', { items });
+    const result = await apiPost('/api/progress/batch-import', { items, month: progressMonthStr() });
     event.target.value = '';
     await render();
     showToast(`导入完成：新增 ${result.added} 个，更新 ${result.updated} 个`);
@@ -3093,7 +3102,7 @@ async function render() {
     if (isAdmin()) {
       try { users = await apiGet('/api/users'); } catch(e) {}
     }
-    try { progress = await apiGet('/api/progress'); } catch(e) {}
+    try { progress = await apiGet('/api/progress?month=' + progressMonthStr()); } catch(e) {}
     let contracts = [];
     try { contracts = await apiGet('/api/contracts'); } catch(e) {}
     

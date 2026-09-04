@@ -966,6 +966,15 @@ function weekOfMonth(dateStr) {
   const wk = Math.ceil(day / 7);
   return wk >= 1 && wk <= 4 ? wk : (wk > 4 ? 4 : 0);
 }
+// ===== 月份工具（招聘进度表按月隔离，不同月份数据不混合计算）=====
+function curMonthStr() {
+  const d = new Date();
+  return monthStr(d.getFullYear(), d.getMonth() + 1);
+}
+function monthOfDate(dateStr) {
+  const m = /^(\d{4})-(\d{2})/.exec((dateStr || '').toString().trim());
+  return m ? m[1] + '-' + m[2] : '';
+}
 // ===== 随访模板/周期（按阶段匹配 + 存量自愈）=====
 function cnDigitToNum(s) {
   const map = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
@@ -1080,67 +1089,102 @@ function syncFollowUpFromInterviews() {
     upsertFollowUp(iv);
   });
 }
-// 以面试记录为源头，重算招聘进度、招聘看板、新人随访
-function syncRecruitFromInterviews() {
-  const map = {};
+// 以面试记录为源头，重算招聘进度（按月隔离）/ 招聘看板（累计在岗）/ 新人随访
+// month: 目标月 YYYY-MM。入职按其「入职时间」所在月计入对应进度行周次；
+//       流失按其「离职时间」所在月计入对应进度行流失——入职月与离职月互不混合。
+//       招聘看板 onboard 是「当前在岗」累计口径（与月份无关），由在职面试人数决定。
+function syncRecruitFromInterviews(month) {
+  const target = month || curMonthStr();
+  const mon = {};      // target 月的入职周次 / 流失
+  const onboardCnt = {}; // 当前在岗（全量，看板漏斗用）
   db.interviews.forEach(iv => {
     if (!iv.position) return;
-    const o = map[iv.position] || (map[iv.position] = { week1: 0, week2: 0, week3: 0, week4: 0, attrition: 0, onboarded: 0 });
-    // 曾入职但已离职（填了离职时间/备注含离职关键词）→ 计入流失并核减入职人数（不参与周次统计）
-    if (isDeparted(iv) && hasOnboardDate(iv)) {
-      o.attrition++;
-    } else if (isOnboarded(iv)) {
-      o.onboarded++;
+    if (isOnboarded(iv)) onboardCnt[iv.position] = (onboardCnt[iv.position] || 0) + 1;
+    // —— 流失：只认「离职时间」字段所在月（备注离职关键词但无离职时间的不入任何月流失，避免错月）——
+    if (isDeparted(iv)) {
+      if (monthOfDate(iv.departureDate) === target) {
+        const o = mon[iv.position] || (mon[iv.position] = { week1: 0, week2: 0, week3: 0, week4: 0, attrition: 0 });
+        o.attrition++;
+      }
+      return;
+    }
+    // —— 入职：入职时间属于 target 月、且尚未离职 → 计入该月第几周（同月入职又离职者仅计流失，不占入职名额）——
+    if (hasOnboardDate(iv) && (iv.result || '') !== '淘汰' && monthOfDate(iv.secondInterviewDate) === target) {
       const wk = weekOfMonth(iv.secondInterviewDate);
-      if (wk >= 1 && wk <= 4) o['week' + wk]++;
+      if (wk >= 1) {
+        const o = mon[iv.position] || (mon[iv.position] = { week1: 0, week2: 0, week3: 0, week4: 0, attrition: 0 });
+        o['week' + Math.min(wk, 4)]++;
+      }
     }
   });
-  // 仅对"有面试关联数据（有在岗或流失）"的岗位重算（完全无数据的岗位保留手动填写）
+  // 只重算 target 月的进度行；该月无任何面试数据的岗位行保留手动/计划值（不清手动录入）
   db.progress.forEach(p => {
-    const o = map[p.position];
-    if (!o || (o.onboarded === 0 && o.attrition === 0)) return;
+    if (p.month !== target) return;
+    const o = mon[p.position];
+    if (!o) return;
     p.week1 = o.week1; p.week2 = o.week2; p.week3 = o.week3; p.week4 = o.week4;
     p.attrition = o.attrition;
     p.totalEntry = p.week1 + p.week2 + p.week3 + p.week4;
     p.shortage = Math.max(0, (p.headcount || 0) - p.totalEntry);
     p.completion = p.headcount > 0 ? Math.round(p.totalEntry / p.headcount * 100) + '%' : '0%';
   });
-  // 有面试关联数据（在岗或流失）但招聘进度表无该岗位行 → 自动补建
-  Object.keys(map).forEach(pos => {
-    const o = map[pos];
-    if ((o.onboarded > 0 || o.attrition > 0) && !db.progress.find(p => p.position === pos)) {
+  // target 月有当月入职/流失数据但进度表无该岗位行 → 自动补建（归属 target 月）
+  Object.keys(mon).forEach(pos => {
+    const o = mon[pos];
+    const hasData = o.attrition > 0 || o.week1 || o.week2 || o.week3 || o.week4;
+    if (hasData && !db.progress.find(p => p.position === pos && p.month === target)) {
       const posRow = db.positions.find(x => x.position === pos);
       const hc = posRow ? (posRow.headcount || 0) : 0;
       db.progress.push({
         id: genId(), position: pos, headcount: hc, priority: '中', urgency: '中', difficulty: '中',
-        planNode: '', week1: o.week1, week2: o.week2, week3: o.week3, week4: o.week4,
-        totalEntry: o.onboarded, shortage: Math.max(0, hc - o.onboarded),
-        completion: hc > 0 ? Math.round(o.onboarded / hc * 100) + '%' : '0%',
+        planNode: '', month: target,
+        week1: o.week1, week2: o.week2, week3: o.week3, week4: o.week4,
+        totalEntry: o.week1 + o.week2 + o.week3 + o.week4,
+        shortage: Math.max(0, hc - (o.week1 + o.week2 + o.week3 + o.week4)),
+        completion: hc > 0 ? Math.round((o.week1 + o.week2 + o.week3 + o.week4) / hc * 100) + '%' : '0%',
         attrition: o.attrition, notes: '', createdBy: 'system', createdAt: new Date().toISOString().split('T')[0]
       });
     }
   });
-  // 有入职人员但招聘看板无该岗位行 → 自动补建，保证看板同步
-  Object.keys(map).forEach(pos => {
-    const o = map[pos];
-    if (o.onboarded > 0 && !db.positions.find(p => p.position === pos)) {
+  // 招聘看板：有当前在岗人员但看板无该岗位行 → 自动补建
+  Object.keys(onboardCnt).forEach(pos => {
+    if (onboardCnt[pos] > 0 && !db.positions.find(p => p.position === pos)) {
       db.positions.unshift({
         id: genId(), position: pos, dept: '',
         headcount: (db.progress.find(p => p.position === pos) || {}).headcount || 0,
         deadline: '',
-        stages: { resumeScreen: 0, firstInterview: 0, secondInterview: 0, finalInterview: 0, offer: 0, onboard: o.onboarded },
+        stages: { resumeScreen: 0, firstInterview: 0, secondInterview: 0, finalInterview: 0, offer: 0, onboard: onboardCnt[pos] },
         status: 'active', createdBy: 'system', createdAt: new Date().toISOString().split('T')[0]
       });
     }
   });
-  // 同步招聘看板（岗位漏斗的已入职）
+  // 同步招聘看板（岗位漏斗的「已入职」= 当前在岗累计，不随月份变化）
   db.positions.forEach(pos => {
-    const o = map[pos.position] || { onboarded: 0 };
     pos.stages = pos.stages || {};
-    pos.stages.onboard = o.onboarded || 0;
+    pos.stages.onboard = onboardCnt[pos.position] || 0;
   });
   syncFollowUpFromInterviews();
   saveDb();
+}
+// 历史进度行迁移：老数据没有 month 字段（且周次曾被全量混算过）→ 归入当前月并清空残留，
+// 作为当月计划行，随后由 sync 只按当月面试数据填充，杜绝 7/8 月历史混入 9 月表。
+function migrateProgressMonths() {
+  const cur = curMonthStr();
+  let changed = false;
+  (db.progress || []).forEach(p => {
+    if (!p.month) {
+      p.month = cur;
+      p.week1 = p.week2 = p.week3 = p.week4 = 0;
+      p.attrition = 0; p.totalEntry = 0;
+      const hc = p.headcount || 0;
+      p.shortage = Math.max(0, hc);
+      p.completion = hc > 0 ? '0%' : '0%';
+      p._migrated = true;
+      changed = true;
+    }
+  });
+  if (changed) saveDb();
+  return changed;
 }
 
 app.get('/api/hires', authMiddleware, (req, res) => {
@@ -1231,14 +1275,18 @@ app.post('/api/hires/:id/periods/:pid/checkins', authMiddleware, (req, res) => {
 
 // ========== Progress Table (Recruitment Progress) ==========
 app.get('/api/progress', authMiddleware, (req, res) => {
+  // 招聘进度表按月隔离：month=YYYY-MM 只返回该月行；不传返回全部（兼容旧调用）
+  const month = (req.query.month || '').toString().trim();
+  if (month) return res.json(db.progress.filter(p => p.month === month));
   // Progress table is shared across all users
   res.json(db.progress);
 });
 
 app.post('/api/progress/sync', authMiddleware, adminOnly, (req, res) => {
-  // 以面试记录为源头，重算招聘进度 / 招聘看板 / 新人随访
-  syncRecruitFromInterviews();
-  res.json({ ok: true, count: db.progress.length });
+  // 以面试记录为源头，重算指定月份（默认当月）的招聘进度 + 招聘看板 + 新人随访
+  const month = (req.body && req.body.month) || curMonthStr();
+  syncRecruitFromInterviews(month);
+  res.json({ ok: true, month, count: db.progress.filter(p => p.month === month).length });
 });
 
 // ========== 招聘看板历史归档（每月1号自动归档上月快照）==========
@@ -1305,17 +1353,18 @@ app.delete('/api/board-history/:month', authMiddleware, adminOnly, (req, res) =>
 app.post('/api/progress', authMiddleware, adminOnly, (req, res) => {
   const item = {
     id: genId(), ...req.body,
+    month: (req.body.month || curMonthStr()),
     createdBy: req.userId,
     createdAt: new Date().toISOString().split('T')[0]
   };
   db.progress.push(item);
-  // Auto-create position in board if not exists
+  // Auto-create position in board if not exists（新岗位初始在岗 0，实际在岗数由面试同步决定）
   const existingPos = db.positions.find(p => p.position === item.position);
   if (!existingPos) {
     db.positions.unshift({
       id: genId(), position: item.position, dept: item.dept || '',
       headcount: item.headcount || 0, deadline: '',
-      stages: { resumeScreen: 0, firstInterview: 0, secondInterview: 0, finalInterview: 0, offer: 0, onboard: item.totalEntry || 0 },
+      stages: { resumeScreen: 0, firstInterview: 0, secondInterview: 0, finalInterview: 0, offer: 0, onboard: 0 },
       status: 'active', createdBy: req.userId, createdAt: new Date().toISOString().split('T')[0]
     });
   }
@@ -1344,12 +1393,8 @@ app.put('/api/progress/:id', authMiddleware, (req, res) => {
     const pos = db.positions.find(x => x.position === p.position);
     if (pos) pos.headcount = req.body.headcount;
   }
-  // Sync totalEntry/onboard to board
-  const pos = db.positions.find(x => x.position === p.position);
-  if (pos) {
-    pos.stages = pos.stages || {};
-    pos.stages.onboard = p.totalEntry || 0;
-  }
+  // 注意：不再把当月 totalEntry 写进招聘看板的「已入职」——看板是当前在岗累计口径，
+  // 由面试记录同步(syncRecruitFromInterviews)统一维护，避免不同月份的进度数据污染累计值。
   saveDb();
   res.json(db.progress[idx]);
 });
@@ -1362,14 +1407,16 @@ app.delete('/api/progress/:id', authMiddleware, adminOnly, (req, res) => {
 
 // Batch import progress from CSV/array
 app.post('/api/progress/batch-import', authMiddleware, (req, res) => {
-  const { items } = req.body;
+  const { items, month } = req.body;
+  const target = month || curMonthStr();
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: '请提供数据数组' });
   }
   let added = 0, updated = 0;
   items.forEach(item => {
     if (!item.position) return;
-    const existing = db.progress.find(p => p.position === item.position);
+    // 上传/导入只作用于指定月份(默认当月)的进度行，不触碰其他月份数据
+    const existing = db.progress.find(p => p.position === item.position && p.month === target);
     if (existing) {
       // Update existing
       if (item.headcount !== undefined) existing.headcount = parseInt(item.headcount) || existing.headcount;
@@ -1398,6 +1445,7 @@ app.post('/api/progress/batch-import', authMiddleware, (req, res) => {
       db.progress.push({
         id: genId(),
         position: item.position,
+        month: target,
         headcount,
         priority: item.priority || '中',
         urgency: item.urgency || '中',
@@ -1933,16 +1981,27 @@ app.get('*', (req, res) => {
   migrateTemplates();
   seedDb();
   ensureDefaultUsers();
+  // 招聘进度表月份迁移：旧行(无 month、周次曾被全量混算)归入当月并清空残留，避免历史月混入本月
+  try { migrateProgressMonths(); } catch (e) { console.error('boot: progress month migrate error:', e.message); }
   // 新版本首次启动自愈：按面试记录重算一次招聘联动（修复存量销售岗随访周期并带出模板题、
   // 清理填了离职时间/备注含离职关键词人员的随访记录、核减招聘进度与看板人数）。
   // 之后由面试记录的增/改/删及"从面试同步"按钮持续驱动。
   if (!bootFreshSeed && !db._recruitAutoSyncOnce) {
     try {
-      syncRecruitFromInterviews();
+      syncRecruitFromInterviews(curMonthStr());
       db._recruitAutoSyncOnce = true;
       await saveDb();
       console.log('boot: recruit-linkage auto-sync done (heal follow-ups / attrition)');
     } catch (e) { console.error('boot: recruit-linkage auto-sync error:', e.message); }
+  }
+  // 招聘进度按月隔离后的当月重算（保证 9 月表只含 9 月入职/离职数据）
+  if (!db._progressAutoSyncOnce) {
+    try {
+      syncRecruitFromInterviews(curMonthStr());
+      db._progressAutoSyncOnce = true;
+      await saveDb();
+      console.log('boot: progress month-isolated sync done (' + curMonthStr() + ')');
+    } catch (e) { console.error('boot: progress month sync error:', e.message); }
   }
   // 归属人回填：新版本上线后，把存量销售岗随访的 owner 补齐为面试邀约人（只跑一次）
   if (!bootFreshSeed && !db._ownerAutoSyncDone) {
