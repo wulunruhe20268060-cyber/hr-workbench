@@ -1278,7 +1278,7 @@ async function renderInterviews(interviews, positions) {
     <button class="btn btn-danger btn-sm" style="margin-left:12px" onclick="batchDeleteInterviews()">批量删除</button>
     <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="document.querySelectorAll('.row-checkbox').forEach(cb=>cb.checked=false);updateBatchDeleteBar()">取消</button>
   </div><div style="overflow-x:auto"><table class="interview-table">
-      <tr><th style="width:40px"><input type="checkbox" onchange="toggleAllRows(this)"></th><th class="sticky-col">序号</th><th class="sticky-col2">姓名</th><th>学历</th><th>性别</th><th>岗位</th><th>电话</th><th>渠道</th><th>面试时间</th><th>入职时间</th><th>面试官</th><th>结果</th>${isAdmin()?'<th>录入人</th>':''}<th>备注</th><th>操作</th></tr>
+      <tr><th style="width:40px"><input type="checkbox" onchange="toggleAllRows(this)"></th><th class="sticky-col">序号</th><th class="sticky-col2">姓名</th><th>学历</th><th>性别</th><th>岗位</th><th>电话</th><th>渠道</th><th>面试时间</th><th>入职时间</th><th>离职时间</th><th>面试官</th><th>结果</th>${isAdmin()?'<th>录入人</th>':''}<th>备注</th><th>操作</th></tr>
       ${(() => { const pageData = paginate([...filtered], interviewPage, interviewPageSize); return pageData.map((iv, idx) => {
         const canModify = isAdmin() || iv.createdBy === auth.userId;
         let tag = '';
@@ -1288,6 +1288,7 @@ async function renderInterviews(interviews, positions) {
         else tag='<span class="tag tag-wait">待面试</span>';
         const d1 = iv.firstInterviewDate||'-';
         const d2 = iv.secondInterviewDate||'-';
+        const d3 = iv.departureDate||'-';
         const seqNum = (interviewPage - 1) * interviewPageSize + idx + 1;
         return `<tr>
           <td style="white-space:nowrap"><input type="checkbox" class="row-checkbox" data-id="${iv.id}" onchange="updateBatchDeleteBar()"></td>
@@ -1298,7 +1299,7 @@ async function renderInterviews(interviews, positions) {
           <td style="white-space:nowrap">${escapeHtml(iv.position)}</td>
           <td style="font-size:13px;white-space:nowrap">${escapeHtml(iv.phone)}</td>
           <td style="font-size:12px;white-space:nowrap">${escapeHtml(iv.source||'-')}</td>
-          <td style="font-size:13px;white-space:nowrap">${d1}</td><td style="font-size:13px;white-space:nowrap">${d2}</td>
+          <td style="font-size:13px;white-space:nowrap">${d1}</td><td style="font-size:13px;white-space:nowrap">${d2}</td><td style="font-size:13px;white-space:nowrap">${d3}</td>
           <td style="white-space:nowrap">${escapeHtml(iv.interviewer||'-')}</td><td style="white-space:nowrap">${tag}</td>
           ${isAdmin()?`<td style="font-size:11px;color:var(--text2);white-space:nowrap">${userMap[iv.createdBy]||'-'}</td>`:''}
           <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${escapeHtml(iv.notes||'')}">${escapeHtml(iv.notes||'-')}</td>
@@ -1318,7 +1319,7 @@ async function renderInterviews(interviews, positions) {
 
 function showAddInterview(editId) {
   let iv = { name:'',phone:'',position:'',education:'',gender:'',inviter:'',source:'',
-    firstInterviewDate:today(),secondInterviewDate:'',interviewer:'',result:'待面试',expectedOnboardDate:'',notes:'' };
+    firstInterviewDate:today(),secondInterviewDate:'',interviewer:'',result:'待面试',departureDate:'',notes:'' };
   if (editId) {
     window._editIvId = editId;
   }
@@ -1331,7 +1332,7 @@ function showAddInterview(editId) {
     <div class="form-row"><div><label>渠道来源</label><select id="f_source"><option value="">--</option><option>BOSS直聘</option><option>猎聘</option><option>拉勾</option><option>内推</option><option>猎头推荐</option><option>官网</option><option>校招</option><option>其他</option></select></div></div>
     <div class="form-row"><div><label>面试时间</label><input type="date" id="f_date1" value="${iv.firstInterviewDate}"></div><div><label>入职时间</label><input type="date" id="f_date2"></div></div>
     <div class="form-row"><div><label>面试官</label><input id="f_interviewer" value=""></div><div><label>面试结果</label><select id="f_result"><option>待面试</option><option>通过</option><option>待定</option><option>淘汰</option></select></div></div>
-    <div class="form-row"><div><label>拟入职时间</label><input type="date" id="f_onboardDate"></div></div>
+    <div class="form-row"><div><label>离职时间</label><input type="date" id="f_departureDate"></div></div>
     <div><label>备注</label><textarea id="f_notes" placeholder="记录面试评价或其他补充信息..."></textarea></div>
     <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="saveInterview('${editId||''}')">${editId?'保存':'添加'}</button></div>
   `);
@@ -1354,7 +1355,7 @@ function showAddInterview(editId) {
           document.getElementById('f_date2').value = found.secondInterviewDate||'';
           document.getElementById('f_interviewer').value = found.interviewer||'';
           document.getElementById('f_result').value = found.result||'待面试';
-          document.getElementById('f_onboardDate').value = found.expectedOnboardDate||'';
+          document.getElementById('f_departureDate').value = found.departureDate||'';
           document.getElementById('f_notes').value = found.notes||'';
         }
       } catch(e) {}
@@ -1385,7 +1386,7 @@ async function saveInterview(editId) {
     secondInterviewDate: document.getElementById('f_date2').value,
     interviewer: document.getElementById('f_interviewer').value.trim(),
     result: document.getElementById('f_result').value,
-    expectedOnboardDate: document.getElementById('f_onboardDate').value,
+    departureDate: document.getElementById('f_departureDate').value,
     notes: document.getElementById('f_notes').value.trim()
   };
   try {
@@ -1412,10 +1413,10 @@ function showBatchImport() {
     <h3>批量粘贴导入</h3>
     <p style="font-size:13px;color:var(--text2);margin-bottom:8px">
       每行一条，用 <code>|</code> 分隔：<br>
-      <code>姓名 | 岗位 | 电话 | 学历 | 性别 | 邀约人 | 渠道 | 面试时间 | 入职时间 | 面试官 | 结果 | 拟入职时间 | 备注</code><br>
+      <code>姓名 | 岗位 | 电话 | 学历 | 性别 | 邀约人 | 渠道 | 面试时间 | 入职时间 | 面试官 | 结果 | 离职时间 | 备注</code><br>
       最少填姓名，其他可空
     </p>
-    <textarea id="f_batch" placeholder="张三 | 前端开发 | 13800138000 | 本科 | 男 | 李主管 | BOSS直聘 | 2026-08-03 |  | 李主管 | 待面试 |  | 5年经验&#10;李四 | 产品经理 | 13900139000 | 硕士 | 女 | 王总 | 内推 | 2026-08-04 | 2026-08-10 | 王总监 | 待面试 | 2026-08-20 | " style="min-height:140px"></textarea>
+    <textarea id="f_batch" placeholder="张三 | 前端开发 | 13800138000 | 本科 | 男 | 李主管 | BOSS直聘 | 2026-08-03 |  | 李主管 | 待面试 |  | 5年经验&#10;李四 | 产品经理 | 13900139000 | 硕士 | 女 | 王总 | 内推 | 2026-08-04 | 2026-08-10 | 王总监 | 通过 |  | 已发offer" style="min-height:140px"></textarea>
     <div style="margin-top:12px"><label>默认初面日期（未填时使用）</label><input type="date" id="f_defaultDate" value="${today()}"></div>
     <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="batchImport()">解析导入</button></div>
   `);
@@ -1440,7 +1441,7 @@ async function batchImport() {
       firstInterviewDate: (parts[7]&&parts[7]!=='-') ? parts[7] : defaultDate,
       secondInterviewDate: (parts[8]&&parts[8]!=='-') ? parts[8] : '',
       interviewer: parts[9]||'', result: (parts[10]&&parts[10]!=='-') ? parts[10] : '待面试',
-      expectedOnboardDate: (parts[11]&&parts[11]!=='-') ? parts[11] : '',
+      departureDate: (parts[11]&&parts[11]!=='-') ? parts[11] : '',
       notes: parts[12]||''
     });
   });
@@ -1456,11 +1457,11 @@ async function exportInterviews() {
     const interviews = await apiGet('/api/interviews');
     if (interviews.length === 0) { showToast('暂无数据可导出'); return; }
     const BOM = '\uFEFF';
-    const headers = '姓名,岗位,电话,学历,性别,邀约人,渠道来源,面试时间,入职时间,面试官,面试结果,拟入职时间,备注';
+    const headers = '姓名,岗位,电话,学历,性别,邀约人,渠道来源,面试时间,入职时间,面试官,面试结果,离职时间,备注';
     const rows = interviews.map(iv => [
       iv.name, iv.position, iv.phone, iv.education||'', iv.gender||'', iv.inviter||'',
       iv.source||'', iv.firstInterviewDate||'', iv.secondInterviewDate||'',
-      iv.interviewer||'', iv.result||'', iv.expectedOnboardDate||'', iv.notes||''
+      iv.interviewer||'', iv.result||'', iv.departureDate||'', iv.notes||''
     ].map(v => '"'+String(v).replace(/"/g,'""')+'"').join(','));
     const csv = BOM + headers + '\n' + rows.join('\n');
     downloadBlob(csv, '面试记录_' + today() + '.csv', 'text/csv;charset=utf-8');
@@ -1495,7 +1496,7 @@ function downloadBlob(content, filename, mimeType) {
 function downloadInterviewTemplate() {
   // CSV template with BOM so Excel opens correctly with Chinese
   const BOM = '\uFEFF';
-  const headers = '姓名,岗位,电话,学历,性别,邀约人,渠道来源,面试时间,入职时间,面试官,面试结果,拟入职时间,备注';
+    const headers = '姓名,岗位,电话,学历,性别,邀约人,渠道来源,面试时间,入职时间,面试官,面试结果,离职时间,备注';
   const sample = '张三,前端开发,13800138000,本科,男,李主管,BOSS直聘,2026-08-03,,李主管,待面试,,5年React经验';
   const csv = BOM + headers + '\n' + sample + '\n';
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -1524,7 +1525,7 @@ async function handleInterviewCSVUpload(event) {
     secondInterviewDate: r['入职时间'] || r['复面时间'] || r['secondInterviewDate'] || '',
     interviewer: r['面试官'] || r['interviewer'] || '',
     result: r['面试结果'] || r['结果'] || r['result'] || '待面试',
-    expectedOnboardDate: r['拟入职时间'] || r['expectedOnboardDate'] || '',
+    departureDate: r['离职时间'] || r['departureDate'] || '',
     notes: r['备注'] || r['notes'] || '',
     education: r['学历'] || r['education'] || '',
     gender: r['性别'] || r['gender'] || '',

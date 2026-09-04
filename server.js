@@ -130,8 +130,10 @@ function genId() {
 }
 
 // ========== Seed Data ==========
+let bootFreshSeed = false;
 function seedDb() {
   if (db.users.length > 0) return;
+  bootFreshSeed = true;
   const now = new Date().toISOString().split('T')[0];
   const adminSalt = genSalt();
   const adminId = genId();
@@ -185,22 +187,22 @@ function seedDb() {
     { id: genId(), name: '李明', position: '高级前端工程师', phone: '13812345678',
       education: '本科', gender: '男', inviter: '张主管', source: 'BOSS直聘',
       firstInterviewDate: now, secondInterviewDate: '', interviewer: '张主管',
-      result: '待面试', expectedOnboardDate: '', notes: '5年React经验，有大厂背景',
+      result: '待面试', departureDate: '', notes: '5年React经验，有大厂背景',
       createdBy: m1Id, createdAt: ys },
     { id: genId(), name: '王芳', position: 'HRBP', phone: '13987654321',
       education: '硕士', gender: '女', inviter: '李总监', source: '猎头推荐',
       firstInterviewDate: ys, secondInterviewDate: '', interviewer: '李总监',
-      result: '通过', expectedOnboardDate: '2026-08-15', notes: '沟通能力强，6年HR经验',
+      result: '通过', departureDate: '', notes: '沟通能力强，6年HR经验',
       createdBy: m1Id, createdAt: '2026-07-28' },
     { id: genId(), name: '张伟面试', position: '市场运营经理', phone: '13611112222',
       education: '本科', gender: '男', inviter: '王总', source: '内推',
       firstInterviewDate: '2026-07-20', secondInterviewDate: '2026-07-25', interviewer: '王总',
-      result: '待定', expectedOnboardDate: '', notes: '需确认薪资期望',
+      result: '待定', departureDate: '', notes: '需确认薪资期望',
       createdBy: adminId, createdAt: '2026-07-18' },
     { id: genId(), name: '赵雪', position: '高级前端工程师', phone: '13733334444',
       education: '大专', gender: '女', inviter: '张主管', source: '拉勾',
       firstInterviewDate: ys, secondInterviewDate: '', interviewer: '张主管',
-      result: '淘汰', expectedOnboardDate: '', notes: '技术基础偏弱',
+      result: '淘汰', departureDate: '', notes: '技术基础偏弱',
       createdBy: m1Id, createdAt: ys }
   ];
 
@@ -320,6 +322,17 @@ function ensureDefaultUsers() {
     changed = true;
     console.log('王燕 (wangyan) 已按默认升级为合同管理员 contract_admin');
   }
+  // 旧字段清理：历史「拟入职时间(expectedOnboardDate)」已废弃，界面改为「离职时间(departureDate)」。
+  // ⚠️ 不把 expectedOnboardDate 的值拷贝到 departureDate —— 那是"计划入职"日期而非离职日期，
+  //    拷贝会把历史计划入职日（如"7.6号"）误判为已离职，导致误删随访记录/误计流失。
+  //    兜底清理新插入行；常规清理由 migrateInterviews() 在启动时统一执行。
+  db.interviews.forEach(iv => {
+    if (iv.expectedOnboardDate !== undefined) {
+      delete iv.expectedOnboardDate;
+      changed = true;
+    }
+    if (iv.departureDate === undefined) { iv.departureDate = ''; changed = true; }
+  });
   if (changed) saveDb();
 }
 
@@ -931,11 +944,17 @@ function hasOnboardDate(iv) {
   const d = (iv && iv.secondInterviewDate || '').toString().trim();
   return d !== '' && d !== '-' && d !== '待定' && d !== '无';
 }
+function hasDepartureDate(iv) {
+  const d = (iv && iv.departureDate || '').toString().trim();
+  return d !== '' && d !== '-';
+}
 function isOnboarded(iv) {
-  // 有入职时间且未被淘汰，视为已入职
-  return hasOnboardDate(iv) && (iv.result || '') !== '淘汰';
+  // 有入职时间、未被淘汰、且未离职（填了离职时间或备注含离职关键词）→ 视为在岗
+  return hasOnboardDate(iv) && (iv.result || '') !== '淘汰' && !isDeparted(iv);
 }
 function isDeparted(iv) {
+  // 离职判定优先看「离职时间」字段；备注含离职关键词作为兜底兼容
+  if (hasDepartureDate(iv)) return true;
   const notes = (iv && iv.notes || '').toString();
   return DEPART_KEYWORDS.some(k => notes.includes(k));
 }
@@ -947,41 +966,110 @@ function weekOfMonth(dateStr) {
   const wk = Math.ceil(day / 7);
   return wk >= 1 && wk <= 4 ? wk : (wk > 4 ? 4 : 0);
 }
-// 按岗位访谈模板生成第1天→第3个月的随访周期（无岗位专属模板则轮换使用全部模板）
+// ===== 随访模板/周期（按阶段匹配 + 存量自愈）=====
+function cnDigitToNum(s) {
+  const map = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+  if (s === '十') return 10;
+  if (map[s] !== undefined) return map[s];
+  if (s.length > 2 && s.indexOf('十') === 1) return 10 + (map[s[2]] || 0); // 十一~十九
+  if (s.length > 1 && s[0] === '十') return map[s[1]] ? 10 * map[s[1]] : 10; // 二十、三十…
+  return 0;
+}
+// 周期名归一化为槽位：第1天→d1，第1周→w1，第2周→w2，第1/2/3个月→m1/m2/m3
+function slotKeyOf(name) {
+  const n = name || '';
+  if (n.includes('天')) return 'd1';
+  const m = /第?([0-9一二三四五六七八九十]+)\s*(周|个月|月)/.exec(n);
+  if (!m) return '';
+  const num = cnDigitToNum(m[1]);
+  if (m[2].includes('周')) return num <= 1 ? 'w1' : (num === 2 ? 'w2' : 'w3');
+  return num <= 1 ? 'm1' : (num === 2 ? 'm2' : 'm3');
+}
+// 按岗位匹配某阶段的访谈模板：岗位专属模板优先，其次全岗位通用模板
+function templateForSlot(positionName, slotKw) {
+  const posKw = positionName === '软件销售' ? ['软件销售', '销售新人']
+    : positionName === '财税销售' ? ['财税销售', '销售新人']
+    : [positionName];
+  const pool = (db.templates || []).filter(t =>
+    (t.name || '').includes(positionName) || posKw.some(k => (t.name || '').includes(k)));
+  const exact = pool.find(t => (t.name || '').includes(slotKw));
+  if (exact) return exact;
+  // 全岗位通用模板兜底（如"新人第一天（全岗位）"）
+  const generic = (db.templates || []).find(t => (t.name || '').includes(slotKw));
+  if (generic) return generic;
+  return pool[0] || null;
+}
+// 按岗位访谈模板生成第1天→第3个月的随访周期：6 个标准槽位，各槽位套用对应阶段的模板
 function buildProbationPeriods(positionName) {
-  const pool = (db.templates || []).filter(t => (t.name || '').includes(positionName));
-  const tpls = pool.length ? pool : (db.templates || []);
-  const schedule = ['第1天', '第1周', '第2周', '第1个月', '第2个月', '第3个月'];
-  return schedule.map((name, i) => {
-    const t = tpls.length ? tpls[i % tpls.length] : null;
-    return {
-      id: genId(), name,
-      templateId: t ? t.id : '',
-      questions: t ? [...(t.questions || [])] : [],
-      checkins: []
-    };
+  const slots = [
+    { name: '第1天', kw: '第一天' }, { name: '第1周', kw: '第一周' }, { name: '第2周', kw: '第二周' },
+    { name: '第1个月', kw: '第一个月' }, { name: '第2个月', kw: '第二个月' }, { name: '第3个月', kw: '第三个月' }
+  ];
+  return slots.map(s => {
+    const t = templateForSlot(positionName, s.kw);
+    return { id: genId(), name: s.name, templateId: t ? t.id : '', questions: t ? [...(t.questions || [])] : [], checkins: [] };
   });
 }
+// 修复/补齐新人随访周期：保持 6 个标准槽位且带模板题，同时保留已有随访记录（按周期名槽位归位）
+function healHirePeriods(h) {
+  const desired = buildProbationPeriods(h.position || '');
+  const byKey = {};
+  (h.periods || []).forEach(p => { const k = slotKeyOf(p.name) || p.name; (byKey[k] = byKey[k] || []).push(p); });
+  let changed = false;
+  const merged = desired.map(slot => {
+    const olds = byKey[slotKeyOf(slot.name)] || [];
+    const old = olds.find(p => (p.checkins || []).length) || olds[0];
+    if (!old) { changed = true; return slot; }
+    let questions = old.questions || [];
+    let templateId = old.templateId || '';
+    if (!questions.length && slot.questions.length) { questions = slot.questions; templateId = slot.templateId; changed = true; }
+    return { id: old.id || slot.id, name: slot.name, templateId, questions, checkins: old.checkins || [] };
+  });
+  // 6 槽之外的历史周期仅在有随访记录时保留（避免误删用户自建周期的随访数据）
+  const extra = (h.periods || []).filter(p => {
+    if (!(p.checkins || []).length) return false;
+    const k = slotKeyOf(p.name);
+    return !k || !desired.some(s => slotKeyOf(s.name) === k);
+  });
+  if (merged.length + extra.length !== (h.periods || []).length) changed = true;
+  h.periods = merged.concat(extra);
+  return changed;
+}
 function upsertFollowUp(iv) {
-  const existing = db.hires.find(h => h.name === iv.name && h.position === iv.position);
   const entryDate = iv.secondInterviewDate;
   const dept = (db.positions.find(p => p.position === iv.position) || {}).dept || '';
+  const existing = db.hires.find(h => h.name === iv.name && h.position === iv.position);
   if (existing) {
-    if (existing.entryDate !== entryDate || existing.createdBy !== iv.createdBy) {
-      existing.entryDate = entryDate;
-      existing.createdBy = iv.createdBy; // 录入人沿用面试记录的录入人
-      saveDb();
-    }
+    let changed = false;
+    if (existing.entryDate !== entryDate) { existing.entryDate = entryDate; changed = true; }
+    if (existing.createdBy !== iv.createdBy) { existing.createdBy = iv.createdBy; changed = true; }
+    if (!existing.dept && dept) { existing.dept = dept; changed = true; }
+    if (healHirePeriods(existing)) changed = true;
+    if (changed) saveDb();
     return;
   }
   db.hires.unshift({
     id: genId(), name: iv.name, position: iv.position, dept,
     entryDate, periods: buildProbationPeriods(iv.position),
-    createdBy: iv.createdBy, createdAt: new Date().toISOString().split('T')[0]
+    createdBy: iv.createdBy, source: 'interview',
+    createdAt: new Date().toISOString().split('T')[0]
   });
   saveDb();
 }
 function syncFollowUpFromInterviews() {
+  // 1) 已离职人员（填了离职时间，或备注含离职关键词）→ 删除其新人随访记录
+  const departedKeys = new Set();
+  db.interviews.forEach(iv => {
+    if (!iv.position || !iv.name) return;
+    if (isDeparted(iv)) departedKeys.add(iv.name + '|' + iv.position);
+  });
+  if (departedKeys.size) {
+    const before = db.hires.length;
+    db.hires = db.hires.filter(h => !departedKeys.has(h.name + '|' + h.position));
+    if (db.hires.length !== before) saveDb();
+  }
+  // 2) 销售岗（软件销售/财税销售/财税顾问）且已入职在岗 → 新建/更新随访并带出模板
   db.interviews.forEach(iv => {
     if (!iv.position) return;
     if (!SALES_POSITIONS.some(s => (iv.position || '').includes(s))) return;
@@ -995,7 +1083,7 @@ function syncRecruitFromInterviews() {
   db.interviews.forEach(iv => {
     if (!iv.position) return;
     const o = map[iv.position] || (map[iv.position] = { week1: 0, week2: 0, week3: 0, week4: 0, attrition: 0, onboarded: 0 });
-    // 曾入职但备注含离职 → 计入流失并核减入职人数（不参与周次统计）
+    // 曾入职但已离职（填了离职时间/备注含离职关键词）→ 计入流失并核减入职人数（不参与周次统计）
     if (isDeparted(iv) && hasOnboardDate(iv)) {
       o.attrition++;
     } else if (isOnboarded(iv)) {
@@ -1004,20 +1092,20 @@ function syncRecruitFromInterviews() {
       if (wk >= 1 && wk <= 4) o['week' + wk]++;
     }
   });
-  // 仅对"有入职数据"的岗位重算周次（无入职数据的岗位保留手动填写）
+  // 仅对"有面试关联数据（有在岗或流失）"的岗位重算（完全无数据的岗位保留手动填写）
   db.progress.forEach(p => {
     const o = map[p.position];
-    if (!o || o.onboarded === 0) return;
+    if (!o || (o.onboarded === 0 && o.attrition === 0)) return;
     p.week1 = o.week1; p.week2 = o.week2; p.week3 = o.week3; p.week4 = o.week4;
     p.attrition = o.attrition;
     p.totalEntry = p.week1 + p.week2 + p.week3 + p.week4;
     p.shortage = Math.max(0, (p.headcount || 0) - p.totalEntry);
     p.completion = p.headcount > 0 ? Math.round(p.totalEntry / p.headcount * 100) + '%' : '0%';
   });
-  // 有入职人员但招聘进度表无该岗位行 → 自动补建
+  // 有面试关联数据（在岗或流失）但招聘进度表无该岗位行 → 自动补建
   Object.keys(map).forEach(pos => {
     const o = map[pos];
-    if (o.onboarded > 0 && !db.progress.find(p => p.position === pos)) {
+    if ((o.onboarded > 0 || o.attrition > 0) && !db.progress.find(p => p.position === pos)) {
       const posRow = db.positions.find(x => x.position === pos);
       const hc = posRow ? (posRow.headcount || 0) : 0;
       db.progress.push({
@@ -1394,7 +1482,6 @@ function migrateInterviews() {
       if (!iv.gender) iv.gender = '';
       if (!iv.inviter) iv.inviter = '';
       if (!iv.secondInterviewDate) iv.secondInterviewDate = '';
-      if (!iv.expectedOnboardDate) iv.expectedOnboardDate = '';
       delete iv.interviewType;
       delete iv.email;
       migrated = true;
@@ -1405,7 +1492,9 @@ function migrateInterviews() {
     iv.inviter = iv.inviter || '';
     iv.firstInterviewDate = iv.firstInterviewDate || '';
     iv.secondInterviewDate = iv.secondInterviewDate || '';
-    iv.expectedOnboardDate = iv.expectedOnboardDate || '';
+    // 统一清理已废弃的 expectedOnboardDate（值不迁到 departureDate，见 ensureDefaultUsers 注释）
+    if (iv.expectedOnboardDate !== undefined) { delete iv.expectedOnboardDate; migrated = true; }
+    iv.departureDate = iv.departureDate || '';
     if (iv.interviewDate) { iv.firstInterviewDate = iv.firstInterviewDate || iv.interviewDate; }
     delete iv.interviewDate;
     delete iv.email;
@@ -1778,6 +1867,17 @@ app.get('*', (req, res) => {
   migrateTemplates();
   seedDb();
   ensureDefaultUsers();
+  // 新版本首次启动自愈：按面试记录重算一次招聘联动（修复存量销售岗随访周期并带出模板题、
+  // 清理填了离职时间/备注含离职关键词人员的随访记录、核减招聘进度与看板人数）。
+  // 之后由面试记录的增/改/删及"从面试同步"按钮持续驱动。
+  if (!bootFreshSeed && !db._recruitAutoSyncOnce) {
+    try {
+      syncRecruitFromInterviews();
+      db._recruitAutoSyncOnce = true;
+      await saveDb();
+      console.log('boot: recruit-linkage auto-sync done (heal follow-ups / attrition)');
+    } catch (e) { console.error('boot: recruit-linkage auto-sync error:', e.message); }
+  }
   // 若本次从文件存储迁移了数据到 Postgres，立即落库，确保不丢失
   if (migratedFromFile) {
     try { await saveDb(); console.log('Migrated existing file data into Postgres (persisted)'); }
