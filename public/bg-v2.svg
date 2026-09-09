@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <!-- 柔和主渐变：深蓝 → 紫罗兰 → 冰蓝 -->
+    <linearGradient id="mainGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b1020"/>
+      <stop offset="30%" stop-color="#14162e"/>
+      <stop offset="55%" stop-color="#1f1838"/>
+      <stop offset="80%" stop-color="#1a2a45"/>
+      <stop offset="100%" stop-color="#132238"/>
+    </linearGradient>
+
+    <!-- 顶部柔和紫蓝光晕 -->
+    <radialGradient id="glowTop" cx="70%" cy="15%" r="55%">
+      <stop offset="0%" stop-color="#7c7df5" stop-opacity="0.14"/>
+      <stop offset="45%" stop-color="#6a6bf0" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#6a6bf0" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- 右下冰蓝光晕 -->
+    <radialGradient id="glowIce" cx="85%" cy="85%" r="45%">
+      <stop offset="0%" stop-color="#5faeff" stop-opacity="0.12"/>
+      <stop offset="50%" stop-color="#4f9dff" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#4f9dff" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- 左下淡紫光晕 -->
+    <radialGradient id="glowViolet" cx="15%" cy="80%" r="40%">
+      <stop offset="0%" stop-color="#a259ff" stop-opacity="0.10"/>
+      <stop offset="55%" stop-color="#8f45f0" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#8f45f0" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- 流动曲线渐变 -->
+    <linearGradient id="flowGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6a8cff" stop-opacity="0"/>
+      <stop offset="35%" stop-color="#6a8cff" stop-opacity="0.22"/>
+      <stop offset="65%" stop-color="#9d6aff" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#9d6aff" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- 玻璃拟态光斑 -->
+    <radialGradient id="orbLight" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="60%" stop-color="#ffffff" stop-opacity="0.03"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+
+    <filter id="blurXL" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="80"/>
+    </filter>
+    <filter id="blurL" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="45"/>
+    </filter>
+    <filter id="blurM" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="22"/>
+    </filter>
+  </defs>
+
+  <!-- 底色 -->
+  <rect width="1920" height="1080" fill="url(#mainGrad)"/>
+
+  <!-- 柔和全局光晕 -->
+  <ellipse cx="1344" cy="162" rx="520" ry="380" fill="url(#glowTop)" filter="url(#blurL)"/>
+  <ellipse cx="1632" cy="918" rx="400" ry="300" fill="url(#glowIce)" filter="url(#blurL)"/>
+  <ellipse cx="288" cy="864" rx="360" ry="280" fill="url(#glowViolet)" filter="url(#blurL)"/>
+
+  <!-- 细密数字网格 -->
+  <g stroke="rgba(255,255,255,0.035)" stroke-width="0.8">
+    <line x1="0" y1="90" x2="1920" y2="90"/>
+    <line x1="0" y1="180" x2="1920" y2="180"/>
+    <line x1="0" y1="270" x2="1920" y2="270"/>
+    <line x1="0" y1="360" x2="1920" y2="360"/>
+    <line x1="0" y1="450" x2="1920" y2="450"/>
+    <line x1="0" y1="540" x2="1920" y2="540"/>
+    <line x1="0" y1="630" x2="1920" y2="630"/>
+    <line x1="0" y1="720" x2="1920" y2="720"/>
+    <line x1="0" y1="810" x2="1920" y2="810"/>
+    <line x1="0" y1="900" x2="1920" y2="900"/>
+    <line x1="0" y1="990" x2="1920" y2="990"/>
+    <line x1="120" y1="0" x2="120" y2="1080"/>
+    <line x1="240" y1="0" x2="240" y2="1080"/>
+    <line x1="360" y1="0" x2="360" y2="1080"/>
+    <line x1="480" y1="0" x2="480" y2="1080"/>
+    <line x1="600" y1="0" x2="600" y2="1080"/>
+    <line x1="720" y1="0" x2="720" y2="1080"/>
+    <line x1="840" y1="0" x2="840" y2="1080"/>
+    <line x1="960" y1="0" x2="960" y2="1080"/>
+    <line x1="1080" y1="0" x2="1080" y2="1080"/>
+    <line x1="1200" y1="0" x2="1200" y2="1080"/>
+    <line x1="1320" y1="0" x2="1320" y2="1080"/>
+    <line x1="1440" y1="0" x2="1440" y2="1080"/>
+    <line x1="1560" y1="0" x2="1560" y2="1080"/>
+    <line x1="1680" y1="0" x2="1680" y2="1080"/>
+    <line x1="1800" y1="0" x2="1800" y2="1080"/>
+  </g>
+
+  <!-- 地面透视网格（更淡） -->
+  <g stroke="rgba(255,255,255,0.04)" stroke-width="1">
+    <line x1="0" y1="1080" x2="960" y2="540"/>
+    <line x1="240" y1="1080" x2="1000" y2="540"/>
+    <line x1="480" y1="1080" x2="1040" y2="540"/>
+    <line x1="720" y1="1080" x2="1080" y2="540"/>
+    <line x1="960" y1="1080" x2="1120" y2="540"/>
+    <line x1="1200" y1="1080" x2="1160" y2="540"/>
+    <line x1="1440" y1="1080" x2="1200" y2="540"/>
+    <line x1="1680" y1="1080" x2="1240" y2="540"/>
+    <line x1="1920" y1="1080" x2="1280" y2="540"/>
+
+    <line x1="-300" y1="920" x2="2220" y2="920"/>
+    <line x1="-150" y1="820" x2="2070" y2="820"/>
+    <line x1="0" y1="720" x2="1920" y2="720"/>
+    <line x1="150" y1="620" x2="1770" y2="620"/>
+    <line x1="300" y1="520" x2="1620" y2="520"/>
+  </g>
+
+  <!-- 流动曲线 -->
+  <path d="M0 400 C 300 360, 560 440, 960 410 S 1580 330, 1920 390" fill="none" stroke="url(#flowGrad)" stroke-width="2.5" opacity="0.35"/>
+  <path d="M0 450 C 320 500, 580 390, 960 440 S 1540 500, 1920 440" fill="none" stroke="url(#flowGrad)" stroke-width="1.8" opacity="0.25"/>
+  <path d="M0 500 C 280 460, 540 540, 960 500 S 1600 440, 1920 500" fill="none" stroke="rgba(106,140,255,0.18)" stroke-width="1.2"/>
+
+  <!-- 玻璃拟态光斑 -->
+  <circle cx="260" cy="780" r="120" fill="url(#orbLight)" filter="url(#blurM)"/>
+  <circle cx="1660" cy="220" r="90" fill="url(#orbLight)" filter="url(#blurM)"/>
+  <circle cx="1480" cy="880" r="70" fill="url(#orbLight)" filter="url(#blurM)"/>
+
+  <!-- 微弱粒子 -->
+  <g fill="rgba(255,255,255,0.45)">
+    <circle cx="340" cy="180" r="1.2"/>
+    <circle cx="500" cy="140" r="0.9"/>
+    <circle cx="680" cy="200" r="1.1"/>
+    <circle cx="1100" cy="130" r="0.9"/>
+    <circle cx="1280" cy="170" r="1.2"/>
+    <circle cx="1460" cy="150" r="0.9"/>
+    <circle cx="220" cy="340" r="0.9"/>
+    <circle cx="420" cy="380" r="1.1"/>
+    <circle cx="780" cy="320" r="0.9"/>
+    <circle cx="1180" cy="290" r="1.1"/>
+    <circle cx="1580" cy="340" r="0.9"/>
+    <circle cx="300" cy="600" r="0.9"/>
+    <circle cx="620" cy="580" r="1.1"/>
+    <circle cx="1020" cy="640" r="0.9"/>
+    <circle cx="1420" cy="600" r="1.1"/>
+    <circle cx="1780" cy="660" r="0.9"/>
+    <circle cx="380" cy="920" r="1.1"/>
+    <circle cx="820" cy="900" r="0.9"/>
+    <circle cx="1220" cy="950" r="1.1"/>
+    <circle cx="1620" cy="920" r="0.9"/>
+  </g>
+
+  <!-- 霓虹蓝紫模糊照明 -->
+  <ellipse cx="960" cy="540" rx="700" ry="450" fill="rgba(120,130,255,0.03)" filter="url(#blurXL)"/>
+</svg>
