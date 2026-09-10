@@ -1306,6 +1306,26 @@ function boardSnapshotOf(list) {
     stages: { resumeScreen: (p.stages && p.stages.resumeScreen) || 0, firstInterview: (p.stages && p.stages.firstInterview) || 0, secondInterview: (p.stages && p.stages.secondInterview) || 0, finalInterview: (p.stages && p.stages.finalInterview) || 0, offer: (p.stages && p.stages.offer) || 0, onboard: (p.stages && p.stages.onboard) || 0 }
   }));
 }
+// 某月的真实指标：面试数(按 interview 创建月份) + 入职/流失(优先取该月 boardHistory 快照 summary，缺失则实时计算)
+function monthMetrics(yyyymm) {
+  const interviewsCount = (db.interviews || []).filter(iv => ((iv.createdAt || '').slice(0, 7) === yyyymm)).length;
+  let onboard = 0, attrition = 0;
+  const snap = (db.boardHistory || []).find(h => h.month === yyyymm);
+  if (snap && snap.summary) {
+    onboard = snap.summary.onboard || 0;
+    attrition = snap.summary.attrition || 0;
+  } else {
+    (db.interviews || []).forEach(iv => {
+      if (isOnboarded(iv) && monthOfDate(iv.secondInterviewDate) === yyyymm) onboard++;
+      if (isDeparted(iv) && monthOfDate(iv.departureDate) === yyyymm) attrition++;
+    });
+  }
+  return { interviews: interviewsCount, onboard, attrition };
+}
+function pctTrend(value, prev) {
+  if (!prev) return value > 0 ? 100 : 0;
+  return Math.round((value - prev) / prev * 100);
+}
 // 归档指定月份(YYYY-MM)。幂等：同月已有记录则跳过不覆盖。
 function archiveBoardSnapshot(month) {
   if (!month) return { archived: false, existed: false, month: null, reason: 'no-month' };
@@ -1314,7 +1334,8 @@ function archiveBoardSnapshot(month) {
   db.boardHistory.unshift({
     id: genId(), month,
     archivedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
-    snapshot: boardSnapshotOf(db.positions)
+    snapshot: boardSnapshotOf(db.positions),
+    summary: monthMetrics(month)
   });
   saveDb();
   return { archived: true, existed: false, month, positions: db.positions.length };
@@ -1348,6 +1369,31 @@ app.delete('/api/board-history/:month', authMiddleware, adminOnly, (req, res) =>
   if (db.boardHistory.length === before) return res.status(404).json({ error: '该月份无归档记录' });
   saveDb();
   res.json({ ok: true, removed: req.params.month });
+});
+
+// ========== KPI 真实环比（本月 vs 上月）==========
+// 面试数按 interview 创建月份统计；入职/流失取当月与上月 boardHistory 快照对比（缺失则实时回退）。
+app.get('/api/kpi-trend', authMiddleware, (req, res) => {
+  const cur = curMonthStr();
+  const prev = prevMonthStr(new Date());
+  const curM = monthMetrics(cur);
+  const prevM = monthMetrics(prev);
+  const hasPrev = (db.boardHistory || []).some(h => h.month === prev)
+    || prevM.interviews > 0 || prevM.onboard > 0 || prevM.attrition > 0;
+  const build = (value, prevVal, increaseGood) => {
+    const pct = pctTrend(value, prevVal);
+    const dir = value > prevVal ? 'up' : (value < prevVal ? 'down' : 'flat');
+    const good = dir === 'flat' ? true : (dir === 'up' ? increaseGood : !increaseGood);
+    return { value, prev: prevVal, pct, dir, good };
+  };
+  res.json({
+    month: cur, prevMonth: prev, hasPrev,
+    metrics: {
+      interviews: build(curM.interviews, prevM.interviews, true),
+      onboard: build(curM.onboard, prevM.onboard, true),
+      attrition: build(curM.attrition, prevM.attrition, false)
+    }
+  });
 });
 
 app.post('/api/progress', authMiddleware, adminOnly, (req, res) => {

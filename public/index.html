@@ -28,6 +28,12 @@ body{
 .chip-danger{background:var(--danger-light);color:#d02b2b;border-color:rgba(245,63,63,.25)}
 .chip-info{background:var(--primary-light);color:var(--primary);border-color:rgba(22,93,255,.22)}
 .chip-violet{background:var(--primary-violet-light);color:var(--primary-violet-hover);border-color:rgba(127,119,221,.28)}
+/* 关键词高亮工具类（与 chip 并存，用于正文/表格中的"流失""逾期"等词） */
+.kw-danger{color:var(--danger);font-weight:600}
+.kw-warn{color:var(--warning);font-weight:600}
+/* 渐变标题（登录框标题 / 应用主标题） */
+.gradient-title{background:linear-gradient(90deg,#165DFF,#7F77DD);-webkit-background-clip:text;background-clip:text;color:transparent;font-weight:700}
+.login-box h1.gradient-title{background:linear-gradient(90deg,#165DFF,#7F77DD);-webkit-background-clip:text;background-clip:text;color:transparent}
 .t-muted{color:var(--text-3)}
 .t-2{color:var(--text-2)}
 /* 二、字号层级工具类 */
@@ -43,6 +49,8 @@ body{
 /* 表头：浅灰背景 + 次要文本色 + 加粗（规范六·3） */
 .ai-table th,.data-table th{background:var(--table-head-bg);color:var(--text-2);font-weight:600;border:1px solid var(--border)}
 .ai-table td,.data-table td{border:1px solid var(--border);padding:6px 8px;color:var(--text);vertical-align:top}
+/* 表格单元格行高统一，提升多行文本可读性 */
+.data-table td,.interview-table td,.progress-table td,.ai-table td{line-height:1.5}
 /* 隔行斑马纹 */
 .ai-table tbody tr:nth-child(even),.data-table tbody tr:nth-child(even){background:rgba(255,255,255,0.55)}
 /* 字段标签用次要文本色，内容用主文本色（规范六·1） */
@@ -95,6 +103,8 @@ body{
   --fs-btn:14px;--lh-btn:22px;
   /* 四、间距（规范四） */
   --gap-module:24px;--gap-sub:16px;--gap-group:12px;--gap-field:12px;--gap-label:8px;
+  /* 字重体系 */
+  --fw-regular:400;--fw-medium:500;--fw-semibold:600;--fw-bold:700;
 }
 /* Login */
 .login-overlay{
@@ -223,7 +233,9 @@ body{
 .card{background:var(--glass);border-radius:var(--radius);padding:20px;margin-bottom:16px;box-shadow:var(--shadow);border:1px solid var(--glass-border);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);transition:transform .18s ease,box-shadow .18s ease}
 .card:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(22,93,255,.15)}
 .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px}
-.card-header h2{font-size:var(--fs-h2);line-height:var(--lh-h2);color:var(--text);font-weight:600;border-left:4px solid var(--primary-violet);padding-left:12px}
+.card-header h2{font-size:var(--fs-h2);line-height:var(--lh-h2);color:var(--text);font-weight:var(--fw-semibold);border-left:4px solid var(--primary-violet);padding-left:12px}
+.section-title{font-weight:var(--fw-semibold)}
+.login-title{font-weight:var(--fw-semibold)}
 /* Form */
 input,textarea,select{
   font-family:inherit;font-size:16px;padding:10px 12px;border:1px solid var(--glass-border);
@@ -345,10 +357,10 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 .team-stat{background:linear-gradient(135deg,var(--glass),var(--glass-strong));border-radius:12px;padding:16px 14px;display:flex;flex-direction:column;gap:8px;position:relative;overflow:hidden;border:1px solid var(--glass-border);box-shadow:var(--shadow);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
 .team-stat .kpi-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:var(--primary-light);color:var(--primary)}
 .team-stat:nth-child(even) .kpi-icon{background:var(--primary-violet-light);color:var(--primary-violet-hover)}
-.team-stat .num{font-size:28px;font-weight:700;color:var(--text);line-height:1.1;letter-spacing:-.5px}
-.team-stat .label{font-size:12px;color:var(--text2)}
-.team-stat .num{font-size:28px;font-weight:700;color:var(--primary)}
+.team-stat .num{font-size:38px;font-weight:700;line-height:1.1;color:#1D2129;font-variant-numeric:tabular-nums;letter-spacing:-.5px}
 .team-stat .label{font-size:12px;color:var(--text2);margin-top:4px}
+.team-stat .kpi-trend{font-size:12px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums;color:var(--success)}
+.team-stat .kpi-trend.down{color:var(--danger)}
 .user-table{width:100%;border-collapse:collapse;font-size:14px}
 .user-table th{padding:10px 8px;font-size:12px;color:var(--text2);font-weight:600;border-bottom:2px solid var(--border)}
 .user-table td{padding:10px 8px;border-bottom:1px solid var(--border)}
@@ -436,7 +448,7 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 <!-- Login Overlay -->
 <div class="login-overlay" id="loginOverlay">
   <div class="login-box">
-    <h1>HR工作台</h1>
+    <h1 class="login-title gradient-title">HR工作台</h1>
     <div class="subtitle">团队协作版</div>
     <input type="text" id="loginUser" placeholder="用户名" autocomplete="username">
     <input type="password" id="loginPass" placeholder="密码" autocomplete="current-password">
@@ -456,7 +468,7 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 <div class="header">
   <h1>
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#165DFF" stroke-width="2" style="vertical-align:middle;margin-right:4px"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><path d="M12 12v3"/><circle cx="12" cy="16" r="1" fill="#165DFF"/></svg>
-    HR全流程工作台
+    <span class="gradient-title">HR全流程工作台</span>
   </h1>
   <div class="header-actions">
     <span class="user-badge" id="userBadge"></span>
@@ -889,7 +901,7 @@ function getTodayItems(todos, interviews, hires, positions, contracts) {
   const now = today();
   const items = [];
   todos.filter(t => !t.completed && t.dueDate && t.dueDate < now).forEach(t => {
-    items.push({ type: 'todo_overdue', title: `[逾期] ${t.title}`, meta: `截止 ${t.dueDate} | ${t.priority}`, data: t, action: 'complete_todo' });
+    items.push({ type: 'todo_overdue', title: `[<span class="kw-warn">逾期</span>] ${t.title}`, meta: `截止 ${t.dueDate} | ${t.priority}`, data: t, action: 'complete_todo' });
   });
   todos.filter(t => !t.completed && t.dueDate === now).forEach(t => {
     items.push({ type: 'todo_today', title: t.title, meta: `今日截止 | ${t.priority}`, data: t, action: 'complete_todo' });
@@ -917,7 +929,7 @@ function getTodayItems(todos, interviews, hires, positions, contracts) {
     }
   });
   positions.filter(p => p.status==='active' && p.deadline && p.deadline < now).forEach(p => {
-    items.push({ type: 'position_overdue', title: `[逾期岗位] ${p.position}`, meta: `截止 ${p.deadline}`, data: p, action: 'view_position' });
+    items.push({ type: 'position_overdue', title: `[<span class="kw-warn">逾期</span>岗位] ${p.position}`, meta: `截止 ${p.deadline}`, data: p, action: 'view_position' });
   });
   return items;
 }
@@ -1036,14 +1048,13 @@ async function handleTodayAction(action, id) {
 }
 
 // ==================== Team Overview (Admin) ====================
-function renderTeamOverview(positions, interviews, todos, hires, users) {
+async function renderTeamOverview(positions, interviews, todos, hires, users) {
   if (!isAdmin()) { document.getElementById('teamOverview').innerHTML = ''; return; }
   const now = today();
   const d = new Date();
   d.setDate(1); const monthStart = d.toISOString().split('T')[0];
   
   const memberCount = (users||[]).filter(u => u.role === 'member').length;
-  const totalInterviews = interviews.length;
   const monthInterviews = interviews.filter(iv => iv.createdAt >= monthStart).length;
   const completedTodos = todos.filter(t => t.completed).length;
   const activeHires = hires.filter(h => {
@@ -1051,13 +1062,26 @@ function renderTeamOverview(positions, interviews, todos, hires, users) {
     return allCheckins.length > 0;
   }).length;
   
+  // 真实环比：本月 vs 上月
+  let trend = null;
+  try { trend = await apiGet('/api/kpi-trend'); } catch(e) { trend = null; }
+  const M = trend && trend.metrics ? trend.metrics : null;
+  const trendHtml = (m) => {
+    if (!trend || !trend.hasPrev || !m) return '';
+    if (m.dir === 'flat') return '<div class="kpi-trend">较上月持平</div>';
+    const arrow = m.dir === 'up' ? '↑' : '↓';
+    return `<div class="kpi-trend${m.good ? '' : ' down'}">${arrow}${Math.abs(m.pct)}% 环比</div>`;
+  };
+  const val = (m, fallback) => (M && m ? m.value : fallback);
+  
   document.getElementById('teamOverview').innerHTML = `
     <div class="team-overview">
+      <div class="team-stat"><div class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div><div class="num">${val(M&&M.interviews,monthInterviews)}</div>${trendHtml(M&&M.interviews)}<div class="label">本月面试数</div></div>
+      <div class="team-stat"><div class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg></div><div class="num">${val(M&&M.onboard,0)}</div>${trendHtml(M&&M.onboard)}<div class="label">本月入职数</div></div>
+      <div class="team-stat"><div class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg></div><div class="num">${val(M&&M.attrition,0)}</div>${trendHtml(M&&M.attrition)}<div class="label">本月<span class="kw-danger">流失</span>数</div></div>
       <div class="team-stat"><div class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div><div class="num">${memberCount}</div><div class="label">团队成员</div></div>
-      <div class="team-stat"><div class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div><div class="num">${totalInterviews}</div><div class="label">面试总记录</div></div>
-      <div class="team-stat"><div class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div><div class="num">${monthInterviews}</div><div class="label">本月新增面试</div></div>
       <div class="team-stat"><div class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div><div class="num">${completedTodos}</div><div class="label">已完成待办</div></div>
-      <div class="team-stat"><div class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg></div><div class="num">${activeHires}</div><div class="label">随访中新人</div></div>
+      <div class="team-stat"><div class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div><div class="num">${activeHires}</div><div class="label">随访中新人</div></div>
     </div>`;
 }
 
@@ -1701,7 +1725,7 @@ async function renderTodos(todos) {
         <div class="todo-check" onclick="toggleTodo('${t.id}')"></div>
         <div class="todo-info">
           <div class="todo-title">${escapeHtml(t.title)} ${isAdmin()&&t.createdBy!==auth.userId?`<span class="creator-tag">${userMap[t.createdBy]||''}</span>`:''}</div>
-          <div class="todo-meta">${t.dueDate?'截止:'+t.dueDate:'无截止'}${overdue?' <span style="color:var(--danger);font-weight:600">逾期</span>':''}</div>
+          <div class="todo-meta">${t.dueDate?'截止:'+t.dueDate:'无截止'}${overdue?' <span class="kw-warn">逾期</span>':''}</div>
         </div>
         <span class="todo-priority ${t.priority.toLowerCase()}">${t.priority}</span>
         ${canModify?`<button class="btn btn-outline btn-xs" onclick="editTodo('${t.id}')">编辑</button><button class="btn btn-danger btn-xs" onclick="deleteTodo('${t.id}')">删除</button>`:''}
@@ -2523,7 +2547,7 @@ function renderProgress(progress) {
       <td style="font-weight:600;color:var(--primary)">${p.totalEntry||0}</td>
       <td style="color:${(p.shortage||0)>0?'var(--danger)':'var(--success)'};font-weight:600">${p.shortage||0}</td>
       <td style="font-weight:600">${p.completion||'0%'}</td>
-      <td class="row-note"><input value="${escapeHtml(p.note||p.notes||'')}" onchange="markDirty('${p.id}','note',this.value)" placeholder="说明">${(p.attrition||0)>0?`<span class="chip chip-danger" style="margin-top:3px">流失 ${p.attrition} 人</span>`:''}</td>
+      <td class="row-note"><input value="${escapeHtml(p.note||p.notes||'')}" onchange="markDirty('${p.id}','note',this.value)" placeholder="说明">${(p.attrition||0)>0?`<span class="chip chip-danger" style="margin-top:3px"><span class="kw-danger">流失</span> ${p.attrition} 人</span>`:''}</td>
       ${canEdit?`<td><button class="btn btn-danger btn-xs" onclick="deleteProgress('${p.id}')">删除</button></td>`:''}
     </tr>`;
   });
