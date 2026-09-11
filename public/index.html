@@ -1405,18 +1405,39 @@ async function renderInterviews(interviews, positions) {
   const resultOptions = ['待面试','通过','待定','淘汰'];
   
   html += `<div class="search-filter-bar">
-    <select class="filter-select" id="filtResult" onchange="render()"><option value="">全部结果</option>${resultOptions.map(r => `<option>${escapeHtml(r)}</option>`).join('')}</select>
-    <select class="filter-select" id="filtPos" onchange="render()"><option value="">全部岗位</option>${positions.map(p => `<option>${escapeHtml(p.position)}</option>`).join('')}</select>
+    <input class="search-input" id="filtSearch" placeholder="搜索姓名 / 学历 / 性别 / 岗位 / 电话 / 渠道 / 面试官 / 备注" oninput="filterInterviews()">
+    <select class="filter-select" id="filtResult" onchange="filterInterviews()"><option value="">全部结果</option>${resultOptions.map(r => `<option>${escapeHtml(r)}</option>`).join('')}</select>
+    <select class="filter-select" id="filtPos" onchange="filterInterviews()"><option value="">全部岗位</option>${positions.map(p => `<option>${escapeHtml(p.position)}</option>`).join('')}</select>
   </div>`;
-  
+
+  // Cache data for filtering
+  window._interviewData = interviews;
+  window._interviewUserMap = userMap;
+
+  html += `<div id="interviewTableContainer"><div style="text-align:center;padding:20px"><span class="loading-spinner"></span></div></div>`;
+  html += `</div>`;
+  document.getElementById('moduleContent').innerHTML = html;
+
   // Apply filters
-  setTimeout(() => {
-    const fr = document.getElementById('filtResult'), fp = document.getElementById('filtPos');
-    if (!fr) return;
-    let filtered = [...interviews];
-    if (fr.value) filtered = filtered.filter(iv => iv.result === fr.value);
-    if (fp.value) filtered = filtered.filter(iv => iv.position === fp.value);
-    filtered.sort((a,b) => (b.firstInterviewDate||'').localeCompare(a.firstInterviewDate||''));
+  setTimeout(() => { filterInterviews(); }, 10);
+}
+
+function filterInterviews() {
+  const interviews = window._interviewData || [];
+  const fr = document.getElementById('filtResult'), fp = document.getElementById('filtPos'), fs = document.getElementById('filtSearch');
+  if (!fr) return;
+  let filtered = [...interviews];
+  if (fr.value) filtered = filtered.filter(iv => iv.result === fr.value);
+  if (fp.value) filtered = filtered.filter(iv => iv.position === fp.value);
+  if (fs && fs.value.trim()) {
+    const kw = fs.value.trim().toLowerCase();
+    filtered = filtered.filter(iv => {
+      const hay = [iv.name, iv.education, iv.gender, iv.position, iv.phone, iv.source, iv.interviewer, iv.notes, iv.result]
+        .map(v => String(v||'')).join(' ').toLowerCase();
+      return hay.includes(kw);
+    });
+  }
+  filtered.sort((a,b) => (b.firstInterviewDate||'').localeCompare(a.firstInterviewDate||''));
     
     const tableEl = document.getElementById('interviewTableContainer');
     if (!tableEl) return;
@@ -1452,7 +1473,7 @@ async function renderInterviews(interviews, positions) {
           <td style="font-size:12px;white-space:nowrap">${escapeHtml(iv.source||'-')}</td>
           <td style="font-size:13px;white-space:nowrap">${d1}</td><td style="font-size:13px;white-space:nowrap">${d2}</td><td style="font-size:13px;white-space:nowrap">${d3}</td>
           <td style="white-space:nowrap">${escapeHtml(iv.interviewer||'-')}</td><td style="white-space:nowrap">${tag}</td>
-          ${isAdmin()?`<td style="font-size:11px;color:var(--text2);white-space:nowrap">${userMap[iv.createdBy]||'-'}</td>`:''}
+          ${isAdmin()?`<td style="font-size:11px;color:var(--text2);white-space:nowrap">${(window._interviewUserMap||{})[iv.createdBy]||'-'}</td>`:''}
           <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${escapeHtml(iv.notes||'')}">${escapeHtml(iv.notes||'-')}</td>
           <td style="white-space:nowrap">
             ${canModify?`<button class="btn btn-outline btn-xs" onclick="editInterview('${iv.id}')">编辑</button><button class="btn btn-danger btn-xs" onclick="deleteInterview('${iv.id}')">删除</button>`:`<span style="font-size:11px;color:var(--text2)">只读</span>`}
@@ -1460,12 +1481,6 @@ async function renderInterviews(interviews, positions) {
         </tr>`;
       }).join('') + renderPagination(filtered.length, interviewPage, interviewPageSize, 'interview'); })()}
     </table></div>`;
-  }, 10);
-  
-  html += `<div id="interviewTableContainer"><div style="text-align:center;padding:20px"><span class="loading-spinner"></span></div></div>`;
-  html += `</div>`;
-  
-  document.getElementById('moduleContent').innerHTML = html;
 }
 
 function showAddInterview(editId) {
@@ -2952,18 +2967,70 @@ async function renderContracts(contracts) {
   });
   contracts.forEach((c, i) => { c.seq = i + 1; });
 
+  // Cache for filtering
+  window._contractsData = contracts;
+  window._contractsTodayStr = todayStr;
+
+  html += `<div class="search-filter-bar">
+    <input class="search-input" id="filtContract" placeholder="搜索员工姓名 / 部门 / 签订单位 / 备注" oninput="filterContracts()">
+  </div>`;
+
   html += `<div class="batch-delete-bar">
     <span style="color:var(--danger);font-weight:600">已选 <span class="batch-count">0</span> 项</span>
     <button class="btn btn-danger btn-sm" style="margin-left:12px" onclick="batchDeleteContracts()">批量删除</button>
     <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="document.querySelectorAll('.row-checkbox').forEach(cb=>cb.checked=false);updateBatchDeleteBar()">取消</button>
   </div>`;
 
-  html += `<div style="overflow-x:auto"><table class="pos-table">
-    <tr><th style="width:40px"><input type="checkbox" onchange="toggleAllRows(this)"></th><th>序号</th><th>员工姓名</th><th>部门</th><th>入职日期</th><th>签订日期</th><th>合同约期</th><th>到期日期</th><th>倒计时</th><th>签订单位</th><th>备注</th><th>操作</th></tr>`;
+  html += `<div style="overflow-x:auto"><table class="pos-table" id="contractTable">
+    <thead><tr><th style="width:40px"><input type="checkbox" onchange="toggleAllRows(this)"></th><th>序号</th><th>员工姓名</th><th>部门</th><th>入职日期</th><th>签订日期</th><th>合同约期</th><th>到期日期</th><th>倒计时</th><th>签订单位</th><th>备注</th><th>操作</th></tr></thead>
+    <tbody id="contractTableBody"></tbody>
+  </table><div id="contractPagination"></div></div></div>`;
+  document.getElementById('moduleContent').innerHTML = html;
 
-  const allContracts = [...contracts];
-  const pagedContracts = paginate(allContracts, contractPage, contractPageSize);
-  pagedContracts.forEach(c => {
+  filterContracts();
+}
+
+function filterContracts() {
+  const contracts = window._contractsData || [];
+  const todayStr = window._contractsTodayStr || today();
+  const fs = document.getElementById('filtContract');
+  let filtered = [...contracts];
+  if (fs && fs.value.trim()) {
+    const kw = fs.value.trim().toLowerCase();
+    filtered = filtered.filter(c => {
+      const hay = [c.name, c.dept, c.signUnit, c.notes, c.endDate, c.entryDate]
+        .map(v => String(v||'')).join(' ').toLowerCase();
+      return hay.includes(kw);
+    });
+  }
+
+  const tbody = document.getElementById('contractTableBody');
+  const pgEl = document.getElementById('contractPagination');
+  if (!tbody) return;
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--text2);padding:20px">暂无匹配记录</td></tr>';
+    if (pgEl) pgEl.innerHTML = '';
+    return;
+  }
+
+  const fmtDate = (d) => {
+    if (!d) return '-';
+    const s = String(d).trim();
+    let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) return parseInt(m[1]) + '/' + parseInt(m[2]) + '/' + parseInt(m[3]);
+    m = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+    if (m) return parseInt(m[1]) + '/' + parseInt(m[2]) + '/' + parseInt(m[3]);
+    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+    if (m) {
+      let y = parseInt(m[3]);
+      if (y < 100) y += 2000;
+      return y + '/' + parseInt(m[1]) + '/' + parseInt(m[2]);
+    }
+    return s;
+  };
+
+  const paged = paginate(filtered, contractPage, contractPageSize);
+  tbody.innerHTML = paged.map(c => {
     const days = c.endDate ? Math.ceil((new Date(c.endDate).setHours(0,0,0,0) - new Date(todayStr).setHours(0,0,0,0)) / 86400000) : 999;
     let countdown = '-';
     let rowClass = '';
@@ -2972,24 +3039,7 @@ async function renderContracts(contracts) {
     else if (days <= 15) { countdown = `<span style="color:var(--danger);font-weight:600">${days}天</span>`; rowClass = 'style="background:#FFF7E8"'; }
     else if (days <= 30) { countdown = `<span style="color:var(--warning);font-weight:500">${days}天</span>`; }
     else countdown = `${days}天`;
-
-    const fmtDate = (d) => {
-      if (!d) return '-';
-      const s = String(d).trim();
-      let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-      if (m) return parseInt(m[1]) + '/' + parseInt(m[2]) + '/' + parseInt(m[3]);
-      m = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);
-      if (m) return parseInt(m[1]) + '/' + parseInt(m[2]) + '/' + parseInt(m[3]);
-      m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
-      if (m) {
-        let y = parseInt(m[3]);
-        if (y < 100) y += 2000;
-        return y + '/' + parseInt(m[1]) + '/' + parseInt(m[2]);
-      }
-      return s;
-    };
-
-    html += `<tr ${rowClass}>
+    return `<tr ${rowClass}>
       <td><input type="checkbox" class="row-checkbox" data-id="${c.id}" onchange="updateBatchDeleteBar()"></td>
       <td>${c.seq}</td>
       <td style="white-space:nowrap"><strong>${escapeHtml(c.name)}</strong></td>
@@ -3003,12 +3053,8 @@ async function renderContracts(contracts) {
       <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${escapeHtml(c.notes||'')}">${escapeHtml(c.notes||'-')}</td>
       <td style="white-space:nowrap"><button class="btn btn-outline btn-xs" onclick="editContract('${c.id}')">编辑</button><button class="btn btn-danger btn-xs" onclick="deleteContract('${c.id}')">删除</button></td>
     </tr>`;
-  });
-
-  html += `</table>`;
-  html += renderPagination(allContracts.length, contractPage, contractPageSize, 'contract');
-  html += `</div></div>`;
-  document.getElementById('moduleContent').innerHTML = html;
+  }).join('');
+  if (pgEl) pgEl.innerHTML = renderPagination(filtered.length, contractPage, contractPageSize, 'contract');
 }
 
 function showAddContract(editId) {
