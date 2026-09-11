@@ -30,7 +30,14 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASS || 'admin123';
 
 // ========== Middleware ==========
 app.use(express.json({ limit: '10mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  // 防止浏览器长期缓存 index.html，确保前端每次都拉到最新构建（避免“改了但页面没变”）
+  setHeaders: (res, filePath) => {
+    if (path.basename(filePath) === 'index.html') {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+  }
+}));
 app.disable('etag');
 
 // ========== Database ==========
@@ -2030,6 +2037,7 @@ app.get('/health', (req, res) => {
 
 // ========== SPA fallback (must be LAST so it never shadows /api routes) ==========
 app.get('*', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 

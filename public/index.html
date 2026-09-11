@@ -1921,9 +1921,13 @@ function renderFollowUp(hires, templates) {
   // Hires with periods
   html += `<div class="card">
     <div class="card-header"><h2>新人带教随访</h2>
-      <button class="btn btn-primary btn-sm" onclick="showAddHire()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>添加新人
-      </button>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" onclick="toggleAllPeriods(false)">全部收起</button>
+        <button class="btn btn-outline btn-sm" onclick="toggleAllPeriods(true)">全部展开</button>
+        <button class="btn btn-primary btn-sm" onclick="showAddHire()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>添加新人
+        </button>
+      </div>
     </div>`;
   
   if (isAdmin()) html += `<div class="admin-hint">管理员视图：可查看所有成员的随访记录</div>`;
@@ -2029,6 +2033,14 @@ async function addStandardPeriods(hireId) {
     showToast(r.added > 0 ? `已添加标准周期 ${r.added} 个（共 ${r.hire.periods.length} 个）` : '标准周期已齐全，无需添加');
     await render();
   } catch(e) { showToast(e.message); }
+}
+
+// 随访周期批量收起/展开：默认渲染为折叠态，提供一键控制
+function toggleAllPeriods(expand) {
+  document.querySelectorAll('.period-card').forEach(card => {
+    if (expand) card.classList.add('open');
+    else card.classList.remove('open');
+  });
 }
 
 async function editPeriod(hireId, periodId) {
