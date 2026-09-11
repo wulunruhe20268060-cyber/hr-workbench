@@ -47,12 +47,12 @@ body{
 /* 六、空值字段显示为 - 并用辅助色 */
 .empty-val{color:var(--text-3)}
 /* 表头：浅灰背景 + 次要文本色 + 加粗（规范六·3） */
-.ai-table th,.data-table th{background:var(--table-head-bg);color:var(--text-2);font-weight:600;border:1px solid var(--border)}
+.ai-table th,.data-table th,.pos-table th,.interview-table th{background:#EEF4FF;color:#2E4A77;font-weight:600;text-align:left;padding:10px 8px;font-size:12px;white-space:nowrap;border-bottom:2px solid #DCE6F5;border-left:none;border-right:none;border-top:none}
 .ai-table td,.data-table td{border:1px solid var(--border);padding:6px 8px;color:var(--text);vertical-align:top}
 /* 表格单元格行高统一，提升多行文本可读性 */
-.data-table td,.interview-table td,.progress-table td,.ai-table td{line-height:1.5}
+.data-table td,.interview-table td,.progress-table td,.ai-table td{line-height:1.5;background:#fff}
 /* 隔行斑马纹 */
-.ai-table tbody tr:nth-child(even),.data-table tbody tr:nth-child(even){background:rgba(255,255,255,0.55)}
+.ai-table tbody tr:nth-child(even),.data-table tbody tr:nth-child(even){background:#fff}
 /* 字段标签用次要文本色，内容用主文本色（规范六·1） */
 .ai-field>label{color:var(--text-2);font-size:var(--fs-label);line-height:var(--lh-label);margin-bottom:4px;display:block}
 .ai-field input,.ai-field textarea,.ai-field select{font-size:var(--fs-body);color:var(--text)}
@@ -133,7 +133,7 @@ body{
   display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;
   flex-wrap:wrap;gap:8px;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
 }
-.header h1{font-size:var(--fs-h1);line-height:var(--lh-h1);font-weight:700;color:var(--text)}
+.header h1{display:inline-block;font-size:var(--fs-h1);line-height:var(--lh-h1);font-weight:700;color:var(--text);padding-bottom:6px;border-bottom:2px solid transparent;border-image:linear-gradient(90deg,#409EFF,#67C23A) 1;border-image-slice:0 0 1 0}
 .header-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .user-badge{
   background:var(--primary-light);color:var(--primary);padding:4px 12px;
@@ -233,8 +233,13 @@ body{
 .card{background:var(--glass);border-radius:var(--radius);padding:20px;margin-bottom:16px;box-shadow:var(--shadow);border:1px solid var(--glass-border);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);transition:transform .18s ease,box-shadow .18s ease}
 .card:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(22,93,255,.15)}
 .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px}
-.card-header h2{font-size:var(--fs-h2);line-height:var(--lh-h2);color:var(--text);font-weight:var(--fw-semibold);border-left:4px solid var(--primary-violet);padding-left:12px}
+.card-header h2{position:relative;font-size:var(--fs-h2);line-height:var(--lh-h2);color:var(--text);font-weight:var(--fw-semibold);padding:10px 0 6px 0;border-left:none}
+.card-header h2::before{content:"";position:absolute;top:0;left:0;width:64px;height:3px;background:linear-gradient(90deg,#409EFF,#67C23A);border-radius:2px}
 .section-title{font-weight:var(--fw-semibold)}
+.search-filter-bar{background:#fff;border-top:1px solid #E8F3FF;border-bottom:1px dashed rgba(64,158,255,0.2);border-radius:8px;padding:14px 16px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:16px}
+.search-input{flex:1;min-width:180px;border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:13px;color:#0E141F;outline:none;font-family:inherit}
+.search-input:focus{border-color:#409EFF}
+.filter-select{border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:13px;color:#0E141F;background:#fff;min-width:120px;font-family:inherit}
 .login-title{font-weight:var(--fw-semibold)}
 /* Form */
 input,textarea,select{
@@ -266,8 +271,8 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 .board-col-count{font-size:22px;font-weight:700;text-align:center;color:var(--text)}
 /* Table */
 .pos-table,.interview-table{width:100%;border-collapse:collapse}
-.pos-table th,.interview-table th{text-align:left;padding:10px 8px;font-size:12px;color:var(--text2);font-weight:600;border-bottom:2px solid var(--border);white-space:nowrap}
-.pos-table td,.interview-table td{padding:10px 8px;border-bottom:1px solid var(--border);vertical-align:top}
+.pos-table th,.interview-table th{border-bottom:2px solid #DCE6F5}
+.pos-table td,.interview-table td{padding:10px 8px;border-bottom:1px solid var(--border);vertical-align:top;background:#fff}
 .pos-table tr:hover,.interview-table tr:hover{background:rgba(255,255,255,0.65)}
 /* Sticky columns for interview table */
 .sticky-col{position:sticky;left:40px;z-index:2;width:44px;min-width:44px}
@@ -360,8 +365,9 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 .interview-filters{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
 .interview-filters select{width:auto;font-size:14px;padding:6px 12px;min-height:36px}
 .admin-hint{font-size:11px;color:var(--text2);font-style:italic;margin-bottom:8px}
-.team-overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
-.team-stat{background:linear-gradient(135deg,var(--glass),var(--glass-strong));border-radius:12px;padding:14px;display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center;border:1px solid var(--glass-border);box-shadow:var(--shadow);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.team-overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px;background:#F8FBFF;border-radius:8px;padding:14px;box-shadow:2px 0 0 0 rgba(64,158,255,0.3),0 2px 0 0 rgba(64,158,255,0.3),0 4px 12px rgba(64,158,255,0.06)}
+.team-stat{background:#fff;border:1px solid rgba(64,158,255,0.15);border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:14px;display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center;transition:transform .15s ease,box-shadow .15s ease}
+.team-stat:hover{transform:translateY(-1px);box-shadow:0 4px 10px rgba(0,0,0,0.08)}
 .team-stat .kpi-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:var(--primary-light);color:var(--primary);flex-shrink:0}
 .team-stat:nth-child(2) .kpi-icon,.team-stat:nth-child(5) .kpi-icon{background:var(--success-light);color:var(--success)}
 .team-stat:nth-child(3) .kpi-icon,.team-stat:nth-child(6) .kpi-icon{background:var(--danger-light);color:var(--danger)}
@@ -1100,6 +1106,7 @@ async function renderTeamOverview(positions, interviews, todos, hires, users) {
 let boardHistoryCache = [];
 async function renderBoard(positions, boardHistory) {
   boardHistoryCache = boardHistory || [];
+  window._boardPositions = positions;
   let html = '';
   const canEdit = isAdmin();
   
@@ -1131,6 +1138,17 @@ async function renderBoard(positions, boardHistory) {
   html += `</div>`;
   
   html += `<div class="card"><div class="card-header"><h2>岗位详情</h2></div>`;
+  html += `<div class="search-filter-bar">
+    <input class="search-input" id="posSearch" placeholder="搜索岗位 / 部门" oninput="filterPositions()">
+    <select class="filter-select" id="posFlow" onchange="filterPositions()">
+      <option value="">全部流程</option>
+      <option value="overdue">已逾期</option>
+      <option value="gap">有缺口</option>
+      <option value="full">已满员</option>
+    </select>
+    <button class="btn btn-primary btn-sm" onclick="filterPositions()">查询</button>
+    <button class="btn btn-outline btn-sm" onclick="resetPosFilter()">重置</button>
+  </div>`;
   if (positions.length===0) {
     html += `<div style="text-align:center;color:var(--text2);padding:20px">暂无岗位${canEdit?'，点击上方按钮新增':''}</div>`;
   } else {
@@ -4060,6 +4078,28 @@ async function saveEdit(coll, id){
 function fld(label, id, value) { return `<div class="ai-field"><label>${label}</label><input id="${id}" value="${escapeHtml(value||'')}"></div>`; }
 function val(id) { const el = document.getElementById(id); return el ? el.value : ''; }
 function setVal(id, v) { const el = document.getElementById(id); if (el) el.value = v || ''; }
+
+// 招聘看板岗位详情搜索筛选栏：纯前端 DOM 过滤，避免重渲染引发回归
+function filterPositions() {
+  const kw = (document.getElementById('posSearch')?.value || '').trim().toLowerCase();
+  const flow = document.getElementById('posFlow')?.value || '';
+  const rows = document.querySelectorAll('#posTable tr[data-pid]');
+  rows.forEach(tr => {
+    const p = (window._boardPositions || []).find(x => x.id === tr.dataset.pid);
+    if (!p) return;
+    const txt = tr.textContent.toLowerCase();
+    let ok = !kw || txt.includes(kw);
+    if (flow === 'overdue') ok = ok && p.deadline && p.deadline < today();
+    if (flow === 'gap') ok = ok && (p.stages.onboard || 0) < (p.headcount || 1);
+    if (flow === 'full') ok = ok && (p.stages.onboard || 0) >= (p.headcount || 1);
+    tr.style.display = ok ? '' : 'none';
+  });
+}
+function resetPosFilter() {
+  const s = document.getElementById('posSearch'); const f = document.getElementById('posFlow');
+  if (s) s.value = ''; if (f) f.value = '';
+  filterPositions();
+}
 </script>
 </body>
 </html>
