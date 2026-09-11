@@ -985,16 +985,18 @@ function cnDigitToNum(s) {
   if (s.length > 1 && s[0] === '十') return map[s[1]] ? 10 * map[s[1]] : 10; // 二十、三十…
   return 0;
 }
-// 周期名归一化为槽位：第1天→d1，第1周→w1，第2周→w2，第1/2/3个月→m1/m2/m3
+// 周期名归一化为槽位：第1天→d1，第N周→wN（w1/w2/w6/w10…区分不同周），第1/2/3个月→m1/m2/m3
 function slotKeyOf(name) {
   const n = name || '';
   if (n.includes('天')) return 'd1';
   const m = /第?([0-9一二三四五六七八九十]+)\s*(周|个月|月)/.exec(n);
   if (!m) return '';
   const num = cnDigitToNum(m[1]);
-  if (m[2].includes('周')) return num <= 1 ? 'w1' : (num === 2 ? 'w2' : 'w3');
+  if (m[2].includes('周')) return 'w' + num;
   return num <= 1 ? 'm1' : (num === 2 ? 'm2' : 'm3');
 }
+// 标准8周期顺序（用于排序与批量生成）：第1天、第1周、第2周、第1个月、第6周、第2个月、第10周、第3个月
+const STANDARD_PERIOD_ORDER = ['d1', 'w1', 'w2', 'm1', 'w6', 'm2', 'w10', 'm3'];
 // 按岗位匹配某阶段的访谈模板：岗位专属模板优先，其次全岗位通用模板
 function templateForSlot(positionName, slotKw) {
   const posKw = positionName === '软件销售' ? ['软件销售', '销售新人']
@@ -1009,18 +1011,19 @@ function templateForSlot(positionName, slotKw) {
   if (generic) return generic;
   return pool[0] || null;
 }
-// 按岗位访谈模板生成第1天→第3个月的随访周期：6 个标准槽位，各槽位套用对应阶段的模板
+// 按岗位访谈模板生成新人随访周期：标准 8 个槽位，各槽位套用对应阶段的模板
 function buildProbationPeriods(positionName) {
   const slots = [
     { name: '第1天', kw: '第一天' }, { name: '第1周', kw: '第一周' }, { name: '第2周', kw: '第二周' },
-    { name: '第1个月', kw: '第一个月' }, { name: '第2个月', kw: '第二个月' }, { name: '第3个月', kw: '第三个月' }
+    { name: '第1个月', kw: '第一个月' }, { name: '第6周', kw: '第六周' },
+    { name: '第2个月', kw: '第二个月' }, { name: '第10周', kw: '第十周' }, { name: '第3个月', kw: '第三个月' }
   ];
   return slots.map(s => {
     const t = templateForSlot(positionName, s.kw);
     return { id: genId(), name: s.name, templateId: t ? t.id : '', questions: t ? [...(t.questions || [])] : [], checkins: [] };
   });
 }
-// 修复/补齐新人随访周期：保持 6 个标准槽位且带模板题，同时保留已有随访记录（按周期名槽位归位）
+// 修复/补齐新人随访周期：保持 8 个标准槽位且带模板题，同时保留已有随访记录（按周期名槽位归位）
 function healHirePeriods(h) {
   const desired = buildProbationPeriods(h.position || '');
   const byKey = {};
@@ -1192,9 +1195,12 @@ app.get('/api/hires', authMiddleware, (req, res) => {
 });
 
 app.post('/api/hires', authMiddleware, (req, res) => {
+  const periods = (req.body.periods && Array.isArray(req.body.periods) && req.body.periods.length)
+    ? req.body.periods
+    : buildProbationPeriods(req.body.position || '');
   const hire = {
     id: genId(), ...req.body,
-    periods: req.body.periods || [],
+    periods,
     // 归属人：优先取前端传入(邀约人)；为空时回退当前登录成员姓名，便于手动建档也有归属
     owner: (req.body.owner || '').toString().trim() || (req.user.displayName || req.user.username || ''),
     createdBy: req.userId,
@@ -1239,6 +1245,33 @@ app.post('/api/hires/:id/periods', authMiddleware, (req, res) => {
   hire.periods.push(period);
   saveDb();
   res.json(hire);
+});
+
+// 批量添加「标准8周期」：按 slotKey 去重（已存在的槽位不重复添加），并按标准顺序排序
+app.post('/api/hires/:id/periods/standard', authMiddleware, (req, res) => {
+  const hire = db.hires.find(h => h.id === req.params.id);
+  if (!hire) return res.status(404).json({ error: '新人记录不存在' });
+  if (req.user.role !== 'admin' && hire.createdBy !== req.userId) {
+    return res.status(403).json({ error: '无权操作' });
+  }
+  if (!hire.periods) hire.periods = [];
+  const existingKeys = new Set(hire.periods.map(p => slotKeyOf(p.name)).filter(Boolean));
+  let added = 0;
+  buildProbationPeriods(hire.position || '').forEach(s => {
+    const k = slotKeyOf(s.name);
+    if (existingKeys.has(k)) return;
+    hire.periods.push(s);
+    existingKeys.add(k);
+    added++;
+  });
+  // 按标准顺序排序，未知槽位排末尾
+  hire.periods.sort((a, b) => {
+    const ka = STANDARD_PERIOD_ORDER.indexOf(slotKeyOf(a.name));
+    const kb = STANDARD_PERIOD_ORDER.indexOf(slotKeyOf(b.name));
+    return (ka < 0 ? 999 : ka) - (kb < 0 ? 999 : kb);
+  });
+  saveDb();
+  res.json({ ok: true, added, hire });
 });
 
 app.put('/api/hires/:id/periods/:pid', authMiddleware, (req, res) => {

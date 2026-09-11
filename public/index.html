@@ -1952,6 +1952,7 @@ function renderFollowUp(hires, templates) {
           <div style="display:flex;gap:4px;flex-wrap:wrap">
             ${canModify?`<button class="btn btn-outline btn-xs" onclick="editHire('${h.id}')">编辑</button>`:''}
             ${canModify?`<button class="btn btn-success btn-xs" onclick="showAddPeriod('${h.id}')">+周期</button>`:''}
+            ${canModify?`<button class="btn btn-outline btn-xs" onclick="addStandardPeriods('${h.id}')" title="一键补齐标准8周期：第1天/第1周/第2周/第1个月/第6周/第2个月/第10周/第3个月">+标准8周期</button>`:''}
             ${canModify?`<button class="btn btn-danger btn-xs" onclick="deleteHire('${h.id}')">删除</button>`:''}
             <button class="btn btn-outline btn-xs" onclick="exportHire('${h.id}')">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>导出
@@ -1961,7 +1962,7 @@ function renderFollowUp(hires, templates) {
         ${periods.length>0 ? periods.map((p,pi) => {
           const tpl = templates.find(t=>t.id===p.templateId);
           const questions = p.questions && p.questions.length>0 ? p.questions : (tpl ? tpl.questions : []);
-          const open = pi === periods.length-1 ? ' open' : '';
+          const open = ''; // 周期默认全部折叠，避免8个周期展开占据页面空间
           return `<div class="period-card${open}">
             <div class="period-card-header" onclick="this.parentElement.classList.toggle('open')">
               <div>
@@ -2018,6 +2019,15 @@ async function savePeriod(hireId) {
       questions: []
     });
     closeModal(); await render(); showToast('周期已添加');
+  } catch(e) { showToast(e.message); }
+}
+
+// 一键补齐「标准8周期」：第1天/第1周/第2周/第1个月/第6周/第2个月/第10周/第3个月（已存在的槽位不重复添加）
+async function addStandardPeriods(hireId) {
+  try {
+    const r = await apiPost('/api/hires/'+hireId+'/periods/standard', {});
+    showToast(r.added > 0 ? `已添加标准周期 ${r.added} 个（共 ${r.hire.periods.length} 个）` : '标准周期已齐全，无需添加');
+    await render();
   } catch(e) { showToast(e.message); }
 }
 
