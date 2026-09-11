@@ -257,7 +257,7 @@ function seedDb() {
   // Progress table (matches the Excel template)
   db.progress = [
     { id: genId(), position: '软件销售', headcount: 2, priority: '高', urgency: '高', difficulty: '中',
-      planNode: '8月7日前到岗1人，8月14日前到岗1人', week1: 0, week2: 0, week3: 0, week4: 0,
+      planNode: '', week1: 0, week2: 0, week3: 0, week4: 0,
       totalEntry: 0, shortage: 2, completion: '0%', notes: '', createdBy: adminId, createdAt: now },
     { id: genId(), position: '产品经理', headcount: 1, priority: '中', urgency: '高', difficulty: '中',
       planNode: '', week1: 0, week2: 0, week3: 0, week4: 0,
