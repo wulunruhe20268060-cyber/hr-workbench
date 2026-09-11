@@ -271,16 +271,17 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 .modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
 /* Board */
 .board-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}
-.board-col{background:linear-gradient(180deg,#fff 0%,#FAFBFF 100%);border-radius:12px;padding:16px 10px;border:1px solid rgba(64,158,255,0.15);box-shadow:0 2px 8px rgba(0,0,0,0.06);transition:transform .18s ease,box-shadow .18s ease;display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center}
+.board-col{background:linear-gradient(180deg,#fff 0%,#FAFBFF 100%);border-radius:12px;padding:14px;border:1px solid rgba(64,158,255,0.15);box-shadow:0 2px 8px rgba(0,0,0,0.06);transition:transform .18s ease,box-shadow .18s ease;display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:center}
 .board-col:hover{transform:translateY(-3px);box-shadow:0 10px 28px rgba(64,158,255,0.18)}
-.board-col-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff;flex-shrink:0}
+.board-col-icon{width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#fff;flex-shrink:0}
 .board-col:nth-child(1) .board-col-icon{background:linear-gradient(135deg,#409EFF,#165DFF)}
 .board-col:nth-child(2) .board-col-icon{background:linear-gradient(135deg,#67C23A,#3D8B40)}
 .board-col:nth-child(3) .board-col-icon{background:linear-gradient(135deg,#E6A23C,#B8821C)}
 .board-col:nth-child(4) .board-col-icon{background:linear-gradient(135deg,#9254DE,#722ED1)}
 .board-col:nth-child(5) .board-col-icon{background:linear-gradient(135deg,#13C2C2,#08979C)}
 .board-col:nth-child(6) .board-col-icon{background:linear-gradient(135deg,#F56C6C,#C45656)}
-.board-col-count{font-size:32px;font-weight:700;line-height:1;color:#1D2129;font-variant-numeric:tabular-nums}
+.board-col-body{display:flex;flex-direction:column;gap:4px;min-width:0}
+.board-col-count{font-size:30px;font-weight:700;line-height:1;color:#1D2129;font-variant-numeric:tabular-nums}
 .board-col-label{font-size:12px;color:var(--text2);font-weight:500}
 /* Table */
 .pos-table,.interview-table{width:100%;border-collapse:collapse}
@@ -401,7 +402,8 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
   .form-row{flex-direction:column;gap:8px}
   .board-columns{grid-template-columns:repeat(3,1fr);gap:6px}
   .board-col{padding:10px 6px;gap:6px}
-  .board-col-icon{width:36px;height:36px;border-radius:10px;font-size:14px}
+  .board-col-icon{width:40px;height:40px;border-radius:10px;font-size:16px}
+  .board-col-body{gap:2px}
   .board-col-count{font-size:22px}
   .board-col-label{font-size:11px}
   .tab-btn{font-size:12px;padding:12px 4px}
@@ -1140,7 +1142,7 @@ async function renderBoard(positions, boardHistory) {
 
   html += `<div class="board-columns">
     ${Object.entries(stageNames).map(([key,label]) => `
-      <div class="board-col"><div class="board-col-icon">${stageIcons[key]}</div><div class="board-col-count">${allStages[key]}</div><div class="board-col-label">${label}</div></div>
+      <div class="board-col"><div class="board-col-icon">${stageIcons[key]}</div><div class="board-col-body"><div class="board-col-count">${allStages[key]}</div><div class="board-col-label">${label}</div></div></div>
     `).join('')}
   </div>`;
   if (total>0) html += `<div style="text-align:center;font-size:13px;color:var(--text2);margin-top:10px">${positions.length} 个岗位 | 管道中 ${total} 人</div>`;
@@ -1244,7 +1246,7 @@ function renderBoardHistory(month) {
   if (snap.length === 0) { wrap.innerHTML = '<div style="text-align:center;color:var(--text2);padding:14px">该月归档无岗位数据</div>'; return; }
   const histIcons = ['简','初','复','终','发','入'];
   let t = `<div style="margin-bottom:10px;font-size:13px;color:var(--text2)">归档时间：${escapeHtml(h.archivedAt||'')} ｜ ${snap.length} 个岗位 ｜ 管道合计 ${total} 人</div>
-    <div class="board-columns">${stageLabels.map((lb,i)=>`<div class="board-col"><div class="board-col-icon">${histIcons[i]}</div><div class="board-col-count">${sum[stageKeys[i]]}</div><div class="board-col-label">${lb}</div></div>`).join('')}</div>
+    <div class="board-columns">${stageLabels.map((lb,i)=>`<div class="board-col"><div class="board-col-icon">${histIcons[i]}</div><div class="board-col-body"><div class="board-col-count">${sum[stageKeys[i]]}</div><div class="board-col-label">${lb}</div></div></div>`).join('')}</div>
     <div style="overflow-x:auto;margin-top:10px"><table class="pos-table">
       <tr><th>岗位</th><th>部门</th><th>需求</th><th>截止</th><th>简历</th><th>初面</th><th>复试</th><th>终面</th><th>Offer</th><th>入职</th></tr>`;
   snap.forEach(p => {
