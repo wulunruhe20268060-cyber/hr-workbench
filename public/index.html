@@ -197,6 +197,7 @@ body{
 .today-mini-list .mini-item{font-size:12px;padding:6px 8px;background:rgba(255,236,232,0.9);border-radius:6px;margin-bottom:6px;color:var(--text);border-left:2px solid var(--danger);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 .today-mini-list .mini-item.today-item{background:#FFF3E8;border-left-color:var(--warning)}
 .today-mini-list .mini-empty{font-size:12px;color:var(--text2);text-align:center;padding:8px}
+.mini-badge{display:inline-block;font-weight:600}
 /* Today */
 .today-bar{
   background:linear-gradient(135deg,#FFECE8 0%,#FFF3E8 100%);
@@ -917,17 +918,18 @@ document.getElementById('mobileTabs').addEventListener('click', e => {
 function getTodayItems(todos, interviews, hires, positions, contracts) {
   const now = today();
   const items = [];
+  const warn = (txt) => `<span class="kw-warn">${txt}</span>`; // 受信任的静态文案，渲染时直接作为 HTML
   todos.filter(t => !t.completed && t.dueDate && t.dueDate < now).forEach(t => {
-    items.push({ type: 'todo_overdue', title: `[<span class="kw-warn">逾期</span>] ${t.title}`, meta: `截止 ${t.dueDate} | ${t.priority}`, data: t, action: 'complete_todo' });
+    items.push({ type: 'todo_overdue', badge: warn('逾期'), title: `待办：${t.title}`, meta: `截止 ${t.dueDate} | ${t.priority}`, data: t, action: 'complete_todo' });
   });
   todos.filter(t => !t.completed && t.dueDate === now).forEach(t => {
-    items.push({ type: 'todo_today', title: t.title, meta: `今日截止 | ${t.priority}`, data: t, action: 'complete_todo' });
+    items.push({ type: 'todo_today', title: `待办：${t.title}`, meta: `今日截止 | ${t.priority}`, data: t, action: 'complete_todo' });
   });
   interviews.filter(iv => iv.interviewDate === now && iv.result === '待面试').forEach(iv => {
-    items.push({ type: 'interview_today', title: `面试: ${iv.name} - ${iv.position}`, meta: `${iv.interviewType} | ${iv.interviewer||'-'}`, data: iv, action: 'view_interview' });
+    items.push({ type: 'interview_today', title: `面试：${iv.name} - ${iv.position}`, meta: `${iv.interviewType} | ${iv.interviewer||'-'}`, data: iv, action: 'view_interview' });
   });
   interviews.filter(iv => iv.interviewDate < now && iv.result === '待定').forEach(iv => {
-    items.push({ type: 'interview_followup', title: `[待跟进] ${iv.name} - ${iv.position}`, meta: `${iv.interviewType} 于 ${iv.interviewDate}`, data: iv, action: 'followup_interview' });
+    items.push({ type: 'interview_followup', badge: warn('待跟进'), title: `${iv.name} - ${iv.position}`, meta: `${iv.interviewType} 于 ${iv.interviewDate}`, data: iv, action: 'followup_interview' });
   });
   // Contract expiry reminders (7 days)
   (contracts||[]).filter(c => {
@@ -942,11 +944,11 @@ function getTodayItems(todos, interviews, hires, positions, contracts) {
     const allCheckins = h.periods ? h.periods.reduce((sum,p) => sum.concat(p.checkins||[]), []) : (h.checkins||[]);
     const lastCheckin = allCheckins.length > 0 ? allCheckins.sort((a,b)=>b.date.localeCompare(a.date))[0].date : h.entryDate;
     if (daysUntil(lastCheckin) < -7) {
-      items.push({ type: 'hire_checkin', title: `[待随访] ${h.name} - ${h.position}`, meta: `上次: ${lastCheckin}`, data: h, action: 'checkin_hire' });
+      items.push({ type: 'hire_checkin', badge: warn('待随访'), title: `${h.name} - ${h.position}`, meta: `上次: ${lastCheckin}`, data: h, action: 'checkin_hire' });
     }
   });
   positions.filter(p => p.status==='active' && p.deadline && p.deadline < now).forEach(p => {
-    items.push({ type: 'position_overdue', title: `[<span class="kw-warn">逾期</span>岗位] ${p.position}`, meta: `截止 ${p.deadline}`, data: p, action: 'view_position' });
+    items.push({ type: 'position_overdue', badge: warn('逾期岗位'), title: `${p.position}`, meta: `截止 ${p.deadline}`, data: p, action: 'view_position' });
   });
   return items;
 }
@@ -1028,7 +1030,8 @@ function renderCalendar(todos, interviews, todayItems) {
   } else {
     todayItems.slice(0, 5).forEach(item => {
       const cls = item.type.includes('overdue') ? '' : 'today-item';
-      html += `<div class="mini-item ${cls}">${escapeHtml(item.title)}</div>`;
+      const badge = item.badge ? `<span class="mini-badge">${item.badge}</span> ` : '';
+      html += `<div class="mini-item ${cls}">${badge}${escapeHtml(item.title)}</div>`;
     });
     if (todayItems.length > 5) html += `<div class="mini-empty">还有 ${todayItems.length - 5} 项...</div>`;
   }

@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#070a1a"/>
+      <stop offset="35%" stop-color="#14123a"/>
+      <stop offset="70%" stop-color="#261656"/>
+      <stop offset="100%" stop-color="#351d7a"/>
+    </linearGradient>
+
+    <radialGradient id="glow1" cx="80%" cy="20%" r="60%">
+      <stop offset="0%" stop-color="#4f46e5" stop-opacity="0.35"/>
+      <stop offset="50%" stop-color="#4f46e5" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#4f46e5" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="glow2" cx="15%" cy="85%" r="55%">
+      <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.32"/>
+      <stop offset="60%" stop-color="#06b6d4" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#06b6d4" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="glow3" cx="90%" cy="90%" r="45%">
+      <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.28"/>
+      <stop offset="70%" stop-color="#8b5cf6" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="waveGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06b6d4" stop-opacity="0"/>
+      <stop offset="30%" stop-color="#06b6d4" stop-opacity="0.35"/>
+      <stop offset="70%" stop-color="#4f46e5" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#4f46e5" stop-opacity="0"/>
+    </linearGradient>
+
+    <linearGradient id="arcGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#818cf8" stop-opacity="0"/>
+    </linearGradient>
+
+    <filter id="blurL" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="40"/>
+    </filter>
+    <filter id="blurM" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="20"/>
+    </filter>
+  </defs>
+
+  <!-- base -->
+  <rect width="1920" height="1080" fill="url(#bgGrad)"/>
+
+  <!-- soft global glows -->
+  <ellipse cx="1536" cy="216" rx="600" ry="450" fill="url(#glow1)" filter="url(#blurL)"/>
+  <ellipse cx="288" cy="918" rx="520" ry="380" fill="url(#glow2)" filter="url(#blurL)"/>
+  <ellipse cx="1728" cy="972" rx="360" ry="280" fill="url(#glow3)" filter="url(#blurM)"/>
+
+  <!-- subtle grid -->
+  <g stroke="rgba(255,255,255,0.06)" stroke-width="1">
+    <line x1="0" y1="120" x2="1920" y2="120"/>
+    <line x1="0" y1="240" x2="1920" y2="240"/>
+    <line x1="0" y1="360" x2="1920" y2="360"/>
+    <line x1="0" y1="480" x2="1920" y2="480"/>
+    <line x1="0" y1="600" x2="1920" y2="600"/>
+    <line x1="0" y1="720" x2="1920" y2="720"/>
+    <line x1="0" y1="840" x2="1920" y2="840"/>
+    <line x1="0" y1="960" x2="1920" y2="960"/>
+    <line x1="240" y1="0" x2="240" y2="1080"/>
+    <line x1="480" y1="0" x2="480" y2="1080"/>
+    <line x1="720" y1="0" x2="720" y2="1080"/>
+    <line x1="960" y1="0" x2="960" y2="1080"/>
+    <line x1="1200" y1="0" x2="1200" y2="1080"/>
+    <line x1="1440" y1="0" x2="1440" y2="1080"/>
+    <line x1="1680" y1="0" x2="1680" y2="1080"/>
+  </g>
+
+  <!-- perspective floor grid (left bottom) -->
+  <g stroke="rgba(255,255,255,0.08)" stroke-width="1.2">
+    <line x1="0" y1="1080" x2="960" y2="540"/>
+    <line x1="240" y1="1080" x2="1000" y2="540"/>
+    <line x1="480" y1="1080" x2="1040" y2="540"/>
+    <line x1="720" y1="1080" x2="1080" y2="540"/>
+    <line x1="960" y1="1080" x2="1120" y2="540"/>
+    <line x1="1200" y1="1080" x2="1160" y2="540"/>
+    <line x1="1440" y1="1080" x2="1200" y2="540"/>
+    <line x1="1680" y1="1080" x2="1240" y2="540"/>
+    <line x1="1920" y1="1080" x2="1280" y2="540"/>
+
+    <line x1="-400" y1="900" x2="2320" y2="900"/>
+    <line x1="-200" y1="800" x2="2120" y2="800"/>
+    <line x1="0" y1="700" x2="1920" y2="700"/>
+    <line x1="200" y1="600" x2="1720" y2="600"/>
+    <line x1="400" y1="500" x2="1520" y2="500"/>
+  </g>
+
+  <!-- flowing light waves -->
+  <path d="M0 420 C 320 380, 600 460, 960 430 S 1600 340, 1920 400" fill="none" stroke="url(#waveGrad)" stroke-width="3" opacity="0.5"/>
+  <path d="M0 460 C 340 520, 620 400, 980 450 S 1580 520, 1920 460" fill="none" stroke="url(#waveGrad)" stroke-width="2" opacity="0.35"/>
+  <path d="M0 500 C 300 450, 580 540, 960 500 S 1620 430, 1920 500" fill="none" stroke="rgba(34,211,238,0.25)" stroke-width="1.5"/>
+
+  <!-- big translucent bubbles/orbs -->
+  <circle cx="240" cy="810" r="140" fill="rgba(34,211,238,0.08)" filter="url(#blurM)"/>
+  <circle cx="1700" cy="180" r="110" fill="rgba(139,92,246,0.10)" filter="url(#blurM)"/>
+  <circle cx="1560" cy="900" r="90" fill="rgba(79,70,229,0.10)" filter="url(#blurM)"/>
+
+  <!-- small glowing dots -->
+  <g fill="rgba(255,255,255,0.6)">
+    <circle cx="320" cy="200" r="2"/>
+    <circle cx="520" cy="160" r="1.5"/>
+    <circle cx="720" cy="240" r="2"/>
+    <circle cx="1120" cy="120" r="1.5"/>
+    <circle cx="1320" cy="180" r="2"/>
+    <circle cx="1520" cy="140" r="1.5"/>
+    <circle cx="180" cy="360" r="1.5"/>
+    <circle cx="400" cy="400" r="2"/>
+    <circle cx="820" cy="340" r="1.5"/>
+    <circle cx="1240" cy="300" r="2"/>
+    <circle cx="1640" cy="360" r="1.5"/>
+    <circle cx="280" cy="640" r="1.5"/>
+    <circle cx="600" cy="600" r="2"/>
+    <circle cx="1000" cy="660" r="1.5"/>
+    <circle cx="1400" cy="620" r="2"/>
+    <circle cx="1760" cy="680" r="1.5"/>
+    <circle cx="360" cy="960" r="2"/>
+    <circle cx="800" cy="920" r="1.5"/>
+    <circle cx="1200" cy="980" r="2"/>
+    <circle cx="1600" cy="940" r="1.5"/>
+  </g>
+
+  <!-- lens-flare arcs -->
+  <path d="M 150 1080 A 500 500 0 0 1 650 580" fill="none" stroke="url(#arcGrad)" stroke-width="2" opacity="0.25"/>
+  <path d="M 1650 0 A 450 450 0 0 1 1200 450" fill="none" stroke="url(#arcGrad)" stroke-width="1.5" opacity="0.2"/>
+</svg>
