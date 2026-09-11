@@ -1125,7 +1125,8 @@ async function handleTodayAction(action, id) {
 
 // ==================== Team Overview (Admin) ====================
 async function renderTeamOverview(positions, interviews, todos, hires, users) {
-  if (!isAdmin()) { document.getElementById('teamOverview').innerHTML = ''; return; }
+  // 英雄带（KPI卡片）仅在招聘看板(0)、面试管理(1)两页显示，其他模块不出现
+  if (![0, 1].includes(currentTab) || !isAdmin()) { document.getElementById('teamOverview').innerHTML = ''; return; }
   const now = today();
   const d = new Date();
   d.setDate(1); const monthStart = d.toISOString().split('T')[0];
