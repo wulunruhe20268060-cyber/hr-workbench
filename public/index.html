@@ -361,12 +361,16 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 .interview-filters select{width:auto;font-size:14px;padding:6px 12px;min-height:36px}
 .admin-hint{font-size:11px;color:var(--text2);font-style:italic;margin-bottom:8px}
 .team-overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
-.team-stat{background:linear-gradient(135deg,var(--glass),var(--glass-strong));border-radius:12px;padding:16px 14px;display:flex;flex-direction:column;gap:8px;position:relative;overflow:hidden;border:1px solid var(--glass-border);box-shadow:var(--shadow);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
-.team-stat .kpi-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:var(--primary-light);color:var(--primary)}
-.team-stat:nth-child(even) .kpi-icon{background:var(--primary-violet-light);color:var(--primary-violet-hover)}
-.team-stat .num{font-size:38px;font-weight:700;line-height:1.1;color:#1D2129;font-variant-numeric:tabular-nums;letter-spacing:-.5px}
-.team-stat .label{font-size:12px;color:var(--text2);margin-top:4px}
-.team-stat .kpi-trend{font-size:12px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums;color:var(--success)}
+.team-stat{background:linear-gradient(135deg,var(--glass),var(--glass-strong));border-radius:12px;padding:14px;display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center;border:1px solid var(--glass-border);box-shadow:var(--shadow);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.team-stat .kpi-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:var(--primary-light);color:var(--primary);flex-shrink:0}
+.team-stat:nth-child(2) .kpi-icon,.team-stat:nth-child(5) .kpi-icon{background:var(--success-light);color:var(--success)}
+.team-stat:nth-child(3) .kpi-icon,.team-stat:nth-child(6) .kpi-icon{background:var(--danger-light);color:var(--danger)}
+.team-stat:nth-child(4) .kpi-icon{background:var(--warning-light);color:var(--warning)}
+.team-stat .kpi-body{display:flex;flex-direction:column;gap:4px;min-width:0;justify-content:center}
+.team-stat .kpi-main{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;line-height:1}
+.team-stat .num{font-size:34px;font-weight:700;line-height:1;color:#1D2129;font-variant-numeric:tabular-nums;letter-spacing:-.5px;text-align:left}
+.team-stat .label{font-size:12px;color:var(--text2);line-height:1.3}
+.team-stat .kpi-trend{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--success);white-space:nowrap}
 .team-stat .kpi-trend.down{color:var(--danger)}
 .user-table{width:100%;border-collapse:collapse;font-size:14px}
 .user-table th{padding:10px 8px;font-size:12px;color:var(--text2);font-weight:600;border-bottom:2px solid var(--border)}
@@ -1083,12 +1087,12 @@ async function renderTeamOverview(positions, interviews, todos, hires, users) {
   
   document.getElementById('teamOverview').innerHTML = `
     <div class="team-overview">
-      <div class="team-stat"><div class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div><div class="num">${val(M&&M.interviews,monthInterviews)}</div>${trendHtml(M&&M.interviews)}<div class="label">本月面试数</div></div>
-      <div class="team-stat"><div class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg></div><div class="num">${val(M&&M.onboard,0)}</div>${trendHtml(M&&M.onboard)}<div class="label">本月入职数</div></div>
-      <div class="team-stat"><div class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg></div><div class="num">${val(M&&M.attrition,0)}</div>${trendHtml(M&&M.attrition)}<div class="label">本月<span class="kw-danger">流失</span>数</div></div>
-      <div class="team-stat"><div class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div><div class="num">${memberCount}</div><div class="label">团队成员</div></div>
-      <div class="team-stat"><div class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div><div class="num">${completedTodos}</div><div class="label">已完成待办</div></div>
-      <div class="team-stat"><div class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div><div class="num">${activeHires}</div><div class="label">随访中新人</div></div>
+      <div class="team-stat"><div class="kpi-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.interviews,monthInterviews)}</div>${trendHtml(M&&M.interviews)}</div><div class="label">本月面试数</div></div></div>
+      <div class="team-stat"><div class="kpi-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg></div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.onboard,0)}</div>${trendHtml(M&&M.onboard)}</div><div class="label">本月入职数</div></div></div>
+      <div class="team-stat"><div class="kpi-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg></div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.attrition,0)}</div>${trendHtml(M&&M.attrition)}</div><div class="label">本月<span class="kw-danger">流失</span>数</div></div></div>
+      <div class="team-stat"><div class="kpi-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div><div class="kpi-body"><div class="kpi-main"><div class="num">${memberCount}</div></div><div class="label">团队成员</div></div></div>
+      <div class="team-stat"><div class="kpi-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div><div class="kpi-body"><div class="kpi-main"><div class="num">${completedTodos}</div></div><div class="label">已完成待办</div></div></div>
+      <div class="team-stat"><div class="kpi-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div><div class="kpi-body"><div class="kpi-main"><div class="num">${activeHires}</div></div><div class="label">随访中新人</div></div></div>
     </div>`;
 }
 
