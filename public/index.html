@@ -331,9 +331,16 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 .category-body{padding:8px 0 0 0;max-height:2000px;overflow:hidden;transition:max-height .3s ease}
 .category-group:not(.open) .category-body{max-height:0;padding:0}
 .hire-card{background:var(--glass);border-radius:8px;padding:14px;margin-bottom:8px;border:1px solid var(--glass-border);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
-.hire-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px}
+.hire-card-header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;cursor:pointer;padding:6px 8px;margin:-6px -8px;border-radius:6px;transition:background .15s}
+.hire-card-header:hover{background:var(--glass-border)}
 .hire-card-header h4{font-size:15px}
 .hire-meta{font-size:12px;color:var(--text2)}
+.hire-card-body{display:none}
+.hire-card.open .hire-card-body{display:block;padding-top:8px}
+.hire-toggle-label{font-size:12px;color:var(--text2);margin-left:4px;white-space:nowrap}
+.hire-card .when-open{display:none}
+.hire-card.open .when-closed{display:none}
+.hire-card.open .when-open{display:inline}
 .checkin-timeline{margin-top:8px}
 .checkin-item{padding:10px;margin-bottom:8px;background:var(--glass);border-radius:6px;border-left:3px solid var(--primary);font-size:13px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 .checkin-item .checkin-date{font-weight:600;color:var(--primary);margin-bottom:4px}
@@ -1922,8 +1929,8 @@ function renderFollowUp(hires, templates) {
   html += `<div class="card">
     <div class="card-header"><h2>新人带教随访</h2>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn btn-outline btn-sm" onclick="toggleAllPeriods(false)">全部收起</button>
-        <button class="btn btn-outline btn-sm" onclick="toggleAllPeriods(true)">全部展开</button>
+        <button class="btn btn-outline btn-sm" onclick="toggleAllHires(false)">全部收起</button>
+        <button class="btn btn-outline btn-sm" onclick="toggleAllHires(true)">全部展开</button>
         <button class="btn btn-primary btn-sm" onclick="showAddHire()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>添加新人
         </button>
@@ -1948,12 +1955,12 @@ function renderFollowUp(hires, templates) {
       const ownerName = (h.owner || '').toString().trim() || userMap[h.createdBy] || '';
       
       return `<div class="hire-card">
-        <div class="hire-card-header">
+        <div class="hire-card-header" onclick="toggleHireCard(this,event)">
           <div>
             <h4>${escapeHtml(h.name)} ${ownerName?`<span class="creator-tag">归属:${escapeHtml(ownerName)}</span>`:''}</h4>
             <div class="hire-meta">${escapeHtml(h.position)} | ${escapeHtml(h.dept)} | 入职:${h.entryDate} | ${periods.length}个周期 | ${totalCheckins}次随访</div>
           </div>
-          <div style="display:flex;gap:4px;flex-wrap:wrap">
+          <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center" onclick="event.stopPropagation()">
             ${canModify?`<button class="btn btn-outline btn-xs" onclick="editHire('${h.id}')">编辑</button>`:''}
             ${canModify?`<button class="btn btn-success btn-xs" onclick="showAddPeriod('${h.id}')">+周期</button>`:''}
             ${canModify?`<button class="btn btn-outline btn-xs" onclick="addStandardPeriods('${h.id}')" title="一键补齐标准8周期：第1天/第1周/第2周/第1个月/第6周/第2个月/第10周/第3个月">+标准8周期</button>`:''}
@@ -1961,8 +1968,13 @@ function renderFollowUp(hires, templates) {
             <button class="btn btn-outline btn-xs" onclick="exportHire('${h.id}')">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>导出
             </button>
+            <button class="btn btn-outline btn-xs hire-toggle-btn" onclick="event.stopPropagation(); this.closest('.hire-card').classList.toggle('open')">
+              <span class="hire-toggle-label when-closed">展开</span>
+              <span class="hire-toggle-label when-open">收起</span>
+            </button>
           </div>
         </div>
+        <div class="hire-card-body">
         ${periods.length>0 ? periods.map((p,pi) => {
           const tpl = templates.find(t=>t.id===p.templateId);
           const questions = p.questions && p.questions.length>0 ? p.questions : (tpl ? tpl.questions : []);
@@ -1992,8 +2004,8 @@ function renderFollowUp(hires, templates) {
               `).join('') : '<div style="font-size:12px;color:var(--text2);padding:8px 0">暂无随访记录，点击"+随访"添加</div>'}
             </div>
           </div>`;
-        }).join('') : '<div style="font-size:12px;color:var(--text2);margin-top:4px">暂无随访周期，点击"+周期"添加</div>'}
-      </div>`;
+        }).join('') : '<div style="font-size:12px;color:var(--text2);padding:8px 0">暂无随访周期，点击"+周期"添加</div>'}
+      </div></div>`;
     }).join('');
   }, 10);
   
@@ -2035,9 +2047,18 @@ async function addStandardPeriods(hireId) {
   } catch(e) { showToast(e.message); }
 }
 
-// 随访周期批量收起/展开：默认渲染为折叠态，提供一键控制
-function toggleAllPeriods(expand) {
-  document.querySelectorAll('.period-card').forEach(card => {
+// 单个人员卡片整体折叠/展开：header 点击展开，按钮区点击不穿透
+function toggleHireCard(header, ev) {
+  if (!ev) return;
+  const target = ev.target;
+  // 点击按钮、按钮内的 svg/文字、或显式的展开按钮时，不触发人员卡片折叠
+  if (target.closest('button') || target.closest('a') || target.closest('[onclick]')) return;
+  header.parentElement.classList.toggle('open');
+}
+
+// 人员卡片批量收起/展开：默认渲染为折叠态，提供一键控制
+function toggleAllHires(expand) {
+  document.querySelectorAll('.hire-card').forEach(card => {
     if (expand) card.classList.add('open');
     else card.classList.remove('open');
   });
