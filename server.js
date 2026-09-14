@@ -390,6 +390,19 @@ function isHireOwner(hire, user) {
   return hire.createdBy === user.id;
 }
 
+// 按姓名（displayName 或 username，忽略大小写/空白）归一为对应用户 id；找不到返回 null
+function userIdByName(name) {
+  if (!name) return null;
+  const n = String(name).trim().toLowerCase();
+  if (!n) return null;
+  const u = db.users.find(x => {
+    const d = (x.displayName || '').toString().trim().toLowerCase();
+    const u2 = (x.username || '').toString().trim().toLowerCase();
+    return d === n || u2 === n;
+  });
+  return u ? u.id : null;
+}
+
 // ========== Auth Routes ==========
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
@@ -664,7 +677,8 @@ app.post('/api/interviews/batch', authMiddleware, (req, res) => {
   res.json({ count: added.length });
 });
 
-// Batch upsert: update existing (by phone or name+position) or add new
+// Batch upsert: 按身份（手机号 / 姓名+岗位）定位同一个人；命中则更新，未命中则新增。
+// 录入人(createdBy) 按「邀约人」姓名归一为对应用户 id；邀约人为空或无法匹配时回退为上传者。
 app.post('/api/interviews/batch-upsert', authMiddleware, (req, res) => {
   const { items } = req.body;
   if (!Array.isArray(items) || items.length === 0) {
@@ -673,23 +687,20 @@ app.post('/api/interviews/batch-upsert', authMiddleware, (req, res) => {
   const now = new Date().toISOString().split('T')[0];
   let updated = 0, added = 0;
   items.forEach(item => {
-    // Match by phone first, then by name+position
+    // 先按手机号、再按「姓名+岗位」定位（身份唯一，避免重复建档；不再加 createdBy 限制，防止同人重复）
     let existing = null;
     if (item.phone) {
-      existing = db.interviews.find(iv =>
-        iv.phone === item.phone && (iv.createdBy === req.userId || req.user.role === 'admin')
-      );
+      existing = db.interviews.find(iv => iv.phone === item.phone);
     }
     if (!existing && item.name && item.position) {
-      existing = db.interviews.find(iv =>
-        iv.name === item.name && iv.position === item.position && (iv.createdBy === req.userId || req.user.role === 'admin')
-      );
+      existing = db.interviews.find(iv => iv.name === item.name && iv.position === item.position);
     }
     if (existing) {
       Object.assign(existing, item, { updatedAt: now });
       updated++;
     } else {
-      db.interviews.unshift({ id: genId(), ...item, createdBy: req.userId, createdAt: now });
+      const byInviter = userIdByName(item.inviter);
+      db.interviews.unshift({ id: genId(), ...item, createdBy: byInviter || req.userId, createdAt: now });
       added++;
     }
   });
