@@ -1064,7 +1064,7 @@ function upsertFollowUp(iv) {
   if (existing) {
     let changed = false;
     if (existing.entryDate !== entryDate) { existing.entryDate = entryDate; changed = true; }
-    if (existing.createdBy !== iv.createdBy) { existing.createdBy = iv.createdBy; changed = true; }
+    // createdBy 保留最初创建者，避免任何后续导入把所有权改写为别的成员
     if (owner && existing.owner !== owner) { existing.owner = owner; changed = true; }
     if (!existing.dept && dept) { existing.dept = dept; changed = true; }
     if (healHirePeriods(existing)) changed = true;
@@ -1091,10 +1091,11 @@ function syncFollowUpFromInterviews() {
     db.hires = db.hires.filter(h => !departedKeys.has(h.name + '|' + h.position));
     if (db.hires.length !== before) saveDb();
   }
-  // 2) 销售岗（软件销售/财税销售/财税顾问）且已入职在岗 → 新建/更新随访并带出模板
+  // 2) 任何岗位且已入职在岗 → 新建/更新随访并带出模板
+  //    （新人随访记录是 HR 团队共享协调数据，任何有入职时间的人员都应自动建档，
+  //    不能限定销售岗，否则其他岗位人员即使已入职也不会出现在随访列表中。）
   db.interviews.forEach(iv => {
     if (!iv.position) return;
-    if (!SALES_POSITIONS.some(s => (iv.position || '').includes(s))) return;
     if (!isOnboarded(iv)) return;
     upsertFollowUp(iv);
   });
@@ -1198,7 +1199,9 @@ function migrateProgressMonths() {
 }
 
 app.get('/api/hires', authMiddleware, (req, res) => {
-  res.json(filterByUser(db.hires, req.userId, req.user.role));
+  // 新人随访属于 HR 团队协调共享数据，全体成员可见（含其他成员创建的 hire），
+  // 不做按 createdBy 过滤，避免出现"只有管理员自动添加成功、普通成员看不到"的孤岛。
+  res.json(db.hires);
 });
 
 app.post('/api/hires', authMiddleware, (req, res) => {
