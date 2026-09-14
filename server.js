@@ -390,6 +390,16 @@ function isHireOwner(hire, user) {
   return hire.createdBy === user.id;
 }
 
+// 判断某条面试记录的「邀约人」是否为当前登录用户（按姓名匹配，忽略大小写/空白）
+function isInterviewInviter(iv, user) {
+  if (!iv || !user) return false;
+  const inv = (iv.inviter || '').toString().trim().toLowerCase();
+  if (!inv) return false;
+  const dn = (user.displayName || '').toString().trim().toLowerCase();
+  const un = (user.username || '').toString().trim().toLowerCase();
+  return inv === dn || inv === un;
+}
+
 // 按姓名（displayName 或 username，忽略大小写/空白）归一为对应用户 id；找不到返回 null
 function userIdByName(name) {
   if (!name) return null;
@@ -648,7 +658,14 @@ function syncOnboardToProgress(positionName, onboardCount) {
 
 // ========== Interviews ==========
 app.get('/api/interviews', authMiddleware, (req, res) => {
-  res.json(filterByUser(db.interviews, req.userId, req.user.role));
+  // 管理员可见全部；普通成员/合同管理员可见「本人创建」或「本人作为邀约人」的面试记录
+  let list;
+  if (req.user.role === 'admin') {
+    list = db.interviews;
+  } else {
+    list = db.interviews.filter(iv => iv.createdBy === req.userId || isInterviewInviter(iv, req.user));
+  }
+  res.json(list);
 });
 
 app.post('/api/interviews', authMiddleware, (req, res) => {
@@ -712,7 +729,7 @@ app.post('/api/interviews/batch-upsert', authMiddleware, (req, res) => {
 app.put('/api/interviews/:id', authMiddleware, (req, res) => {
   const idx = db.interviews.findIndex(iv => iv.id === req.params.id);
   if (idx < 0) return res.status(404).json({ error: '面试记录不存在' });
-  if (req.user.role !== 'admin' && db.interviews[idx].createdBy !== req.userId) {
+  if (req.user.role !== 'admin' && db.interviews[idx].createdBy !== req.userId && !isInterviewInviter(db.interviews[idx], req.user)) {
     return res.status(403).json({ error: '无权修改他人记录' });
   }
   db.interviews[idx] = { ...db.interviews[idx], ...req.body };
@@ -724,7 +741,7 @@ app.put('/api/interviews/:id', authMiddleware, (req, res) => {
 app.delete('/api/interviews/:id', authMiddleware, (req, res) => {
   const iv = db.interviews.find(iv => iv.id === req.params.id);
   if (!iv) return res.status(404).json({ error: '面试记录不存在' });
-  if (req.user.role !== 'admin' && iv.createdBy !== req.userId) {
+  if (req.user.role !== 'admin' && iv.createdBy !== req.userId && !isInterviewInviter(iv, req.user)) {
     return res.status(403).json({ error: '无权删除他人记录' });
   }
   db.interviews = db.interviews.filter(iv => iv.id !== req.params.id);
@@ -739,7 +756,8 @@ app.post('/api/interviews/batch-delete', authMiddleware, (req, res) => {
   if (req.user.role === 'admin') {
     db.interviews = db.interviews.filter(iv => !ids.includes(iv.id));
   } else {
-    db.interviews = db.interviews.filter(iv => !ids.includes(iv.id) || iv.createdBy !== req.userId);
+    // 非管理员：仅保留「本人创建」或「本人作为邀约人」的记录，其余按所选 ID 删除
+    db.interviews = db.interviews.filter(iv => !ids.includes(iv.id) || iv.createdBy === req.userId || isInterviewInviter(iv, req.user));
   }
   syncRecruitFromInterviews();
   res.json({ ok: true, removed: before - db.interviews.length });
