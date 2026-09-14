@@ -2846,31 +2846,35 @@ async function parseUploadedSpreadsheet(file) {
     const text = await readCSVFile(file);
     return parseCSV(text);
   }
-  // Excel (.xlsx / .xls) via SheetJS — read with date parsing
+  // Excel (.xlsx / .xls) via SheetJS — 读取【整个工作簿】的所有工作表，合并数据行
   const buf = await file.arrayBuffer();
   const workbook = XLSX.read(buf, { type: 'array', cellDates: true });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', blankrows: false, raw: false });
-  if (rows.length < 2) return [];
-  const headers = rows[0].map(h => String(h).trim());
   const result = [];
-  for (let i = 1; i < rows.length; i++) {
-    const obj = {};
-    headers.forEach((h, idx) => {
-      let v = rows[i][idx];
-      // Excel with cellDates:true returns Date objects; convert to ISO
-      if (v instanceof Date && !isNaN(v.getTime())) {
-        v = v.toISOString().split('T')[0];
-      } else if (typeof v === 'number') {
-        // Numeric Excel serial date
-        v = excelDateToISO(v);
-      } else {
-        v = String(v || '').trim();
-      }
-      obj[h] = v || '';
-    });
-    if (Object.values(obj).some(v => v !== '')) result.push(obj);
-  }
+  workbook.SheetNames.forEach(sheetName => {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) return;
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', blankrows: false, raw: false });
+    if (rows.length < 2) return; // 跳过空表 / 只有表头的表
+    const headers = rows[0].map(h => String(h == null ? '' : h).trim());
+    for (let i = 1; i < rows.length; i++) {
+      const obj = {};
+      headers.forEach((h, idx) => {
+        let v = rows[i][idx];
+        // Excel with cellDates:true returns Date objects; convert to ISO
+        if (v instanceof Date && !isNaN(v.getTime())) {
+          v = v.toISOString().split('T')[0];
+        } else if (typeof v === 'number') {
+          // Numeric Excel serial date
+          v = excelDateToISO(v);
+        } else {
+          v = String(v == null ? '' : v).trim();
+        }
+        obj[h] = v || '';
+      });
+      // 仅保留至少有一格有内容的行（每张表用各自表头解析）
+      if (Object.values(obj).some(v => v !== '')) result.push(obj);
+    }
+  });
   return result;
 }
 

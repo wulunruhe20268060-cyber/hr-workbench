@@ -694,6 +694,7 @@ app.post('/api/interviews/batch-upsert', authMiddleware, (req, res) => {
     }
   });
   syncRecruitFromInterviews();
+  saveDb();
   res.json({ added, updated });
 });
 
