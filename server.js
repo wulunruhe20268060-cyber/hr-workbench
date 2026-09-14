@@ -892,7 +892,15 @@ app.put('/api/templates/:id', authMiddleware, (req, res) => {
   const idx = db.templates.findIndex(t => t.id === req.params.id);
   if (idx < 0) return res.status(404).json({ error: '模板不存在' });
   db.templates[idx] = { ...db.templates[idx], ...req.body };
+  // 模板被修改后，将最新问题同步下发到所有引用该模板的新人随访周期（含已有随访记录的新人），
+  // 杜绝「改了模板，下面新人的随访问题却还是旧的」这类不同步问题。
+  let synced = 0;
+  const newQuestions = db.templates[idx].questions || [];
+  (db.hires || []).forEach(h => (h.periods || []).forEach(p => {
+    if (p.templateId === db.templates[idx].id) { p.questions = [...newQuestions]; synced++; }
+  }));
   saveDb();
+  console.log('template updated: ' + (db.templates[idx].name || '') + ' (synced ' + synced + ' follow-up period(s))');
   res.json(db.templates[idx]);
 });
 
@@ -1083,6 +1091,21 @@ function healHirePeriods(h) {
   });
   if (merged.length + extra.length !== (h.periods || []).length) changed = true;
   h.periods = merged.concat(extra);
+  return changed;
+}
+// 将每个新人随访周期的「问题」与所绑定模板的最新问题保持一致（模板被改后自动下发）。
+// 只在问题确实不同步时才改写，幂等，可安全在启动时反复调用。
+function syncPeriodsFromTemplates() {
+  let changed = 0;
+  (db.hires || []).forEach(h => (h.periods || []).forEach(p => {
+    if (!p.templateId) return;
+    const tpl = (db.templates || []).find(t => t.id === p.templateId);
+    if (!tpl) return;
+    const tplQs = tpl.questions || [];
+    const cur = p.questions || [];
+    const same = cur.length === tplQs.length && cur.every((q, i) => q === tplQs[i]);
+    if (!same) { p.questions = [...tplQs]; changed++; }
+  }));
   return changed;
 }
 function upsertFollowUp(iv) {
@@ -2148,6 +2171,16 @@ app.get('*', (req, res) => {
       (db.hires || []).forEach(h => { if (healHirePeriods(h)) healed++; });
       if (healed) { await saveDb(); console.log('boot: healed ' + healed + ' hire follow-up period set(s)'); }
     } catch (e) { console.error('boot: follow-up period heal error:', e.message); }
+  }
+  // 一次性补偿同步：把已存在新人随访周期的问题，对齐到各自绑定模板的最新版本。
+  // 用于修复「模板已改、但历史新建的随访周期仍显示旧问题」的情况；仅首次启动执行一次，避免覆盖后续人工自定义。
+  if (!bootFreshSeed && !db._templateSyncV1) {
+    try {
+      const synced = syncPeriodsFromTemplates();
+      if (synced) { await saveDb(); console.log('boot: synced ' + synced + ' follow-up period(s) to their templates'); }
+      db._templateSyncV1 = true;
+      try { await saveDb(); } catch (e) {}
+    } catch (e) { console.error('boot: template sync error:', e.message); }
   }
   // 若本次从文件存储迁移了数据到 Postgres，立即落库，确保不丢失
   if (migratedFromFile) {
