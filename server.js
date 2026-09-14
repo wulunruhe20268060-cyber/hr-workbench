@@ -1144,14 +1144,19 @@ function syncFollowUpFromInterviews() {
     db.hires = db.hires.filter(h => !departedKeys.has(h.name + '|' + h.position));
     if (db.hires.length !== before) saveDb();
   }
-  // 2) 任何岗位且已入职在岗 → 新建/更新随访并带出模板
-  //    （新人随访记录是 HR 团队共享协调数据，任何有入职时间的人员都应自动建档，
-  //    不能限定销售岗，否则其他岗位人员即使已入职也不会出现在随访列表中。）
+  // 2) 仅「软件销售 / 财税销售 / 财税顾问」三类销售岗位、且已入职在岗 → 新建/更新随访并带出模板
+  //    其他岗位（如产品经理、Java开发等）不自动建档，避免无关岗位占据随访列表。
   db.interviews.forEach(iv => {
     if (!iv.position) return;
+    if (!SALES_POSITIONS.some(s => (iv.position || '').includes(s))) return;
     if (!isOnboarded(iv)) return;
     upsertFollowUp(iv);
   });
+  // 3) 清理：此前自动建档（source: 'interview'）但岗位不属于三类销售岗的随访记录，
+  //    保持列表只含销售岗新人。手动新建的记录不含该标记，不受影响。
+  const beforeClean = db.hires.length;
+  db.hires = db.hires.filter(h => h.source !== 'interview' || SALES_POSITIONS.some(s => (h.position || '').includes(s)));
+  if (db.hires.length !== beforeClean) saveDb();
 }
 // 以面试记录为源头，重算招聘进度（按月隔离）/ 招聘看板（累计在岗）/ 新人随访
 // month: 目标月 YYYY-MM。入职按其「入职时间」所在月计入对应进度行周次；
