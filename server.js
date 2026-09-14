@@ -377,6 +377,19 @@ function contractAccess(req, res, next) {
   next();
 }
 
+// 判断当前登录用户是否是某条新人随访记录的「归属人」
+// 规则：hire.owner 存在时按姓名匹配；为空时回退到 createdBy（兼容历史/手动建档）
+function isHireOwner(hire, user) {
+  if (!hire || !user) return false;
+  const ownerName = (hire.owner || '').toString().trim();
+  if (ownerName) {
+    const displayName = (user.displayName || '').toString().trim();
+    const username = (user.username || '').toString().trim();
+    return ownerName === displayName || ownerName === username;
+  }
+  return hire.createdBy === user.id;
+}
+
 // ========== Auth Routes ==========
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
@@ -1224,7 +1237,7 @@ app.post('/api/hires', authMiddleware, (req, res) => {
 app.put('/api/hires/:id', authMiddleware, (req, res) => {
   const idx = db.hires.findIndex(h => h.id === req.params.id);
   if (idx < 0) return res.status(404).json({ error: '新人记录不存在' });
-  if (req.user.role !== 'admin' && db.hires[idx].createdBy !== req.userId) {
+  if (req.user.role !== 'admin' && !isHireOwner(db.hires[idx], req.user)) {
     return res.status(403).json({ error: '无权修改他人记录' });
   }
   db.hires[idx] = { ...db.hires[idx], ...req.body };
@@ -1235,7 +1248,7 @@ app.put('/api/hires/:id', authMiddleware, (req, res) => {
 app.delete('/api/hires/:id', authMiddleware, (req, res) => {
   const hire = db.hires.find(h => h.id === req.params.id);
   if (!hire) return res.status(404).json({ error: '新人记录不存在' });
-  if (req.user.role !== 'admin' && hire.createdBy !== req.userId) {
+  if (req.user.role !== 'admin' && !isHireOwner(hire, req.user)) {
     return res.status(403).json({ error: '无权删除他人记录' });
   }
   db.hires = db.hires.filter(h => h.id !== req.params.id);
@@ -1247,7 +1260,7 @@ app.delete('/api/hires/:id', authMiddleware, (req, res) => {
 app.post('/api/hires/:id/periods', authMiddleware, (req, res) => {
   const hire = db.hires.find(h => h.id === req.params.id);
   if (!hire) return res.status(404).json({ error: '新人记录不存在' });
-  if (req.user.role !== 'admin' && hire.createdBy !== req.userId) {
+  if (req.user.role !== 'admin' && !isHireOwner(hire, req.user)) {
     return res.status(403).json({ error: '无权操作' });
   }
   if (!hire.periods) hire.periods = [];
@@ -1261,7 +1274,7 @@ app.post('/api/hires/:id/periods', authMiddleware, (req, res) => {
 app.post('/api/hires/:id/periods/standard', authMiddleware, (req, res) => {
   const hire = db.hires.find(h => h.id === req.params.id);
   if (!hire) return res.status(404).json({ error: '新人记录不存在' });
-  if (req.user.role !== 'admin' && hire.createdBy !== req.userId) {
+  if (req.user.role !== 'admin' && !isHireOwner(hire, req.user)) {
     return res.status(403).json({ error: '无权操作' });
   }
   if (!hire.periods) hire.periods = [];
@@ -1287,6 +1300,9 @@ app.post('/api/hires/:id/periods/standard', authMiddleware, (req, res) => {
 app.put('/api/hires/:id/periods/:pid', authMiddleware, (req, res) => {
   const hire = db.hires.find(h => h.id === req.params.id);
   if (!hire) return res.status(404).json({ error: '新人记录不存在' });
+  if (req.user.role !== 'admin' && !isHireOwner(hire, req.user)) {
+    return res.status(403).json({ error: '无权操作' });
+  }
   const period = (hire.periods||[]).find(p => p.id === req.params.pid);
   if (!period) return res.status(404).json({ error: '周期不存在' });
   Object.assign(period, req.body);
@@ -1297,6 +1313,9 @@ app.put('/api/hires/:id/periods/:pid', authMiddleware, (req, res) => {
 app.delete('/api/hires/:id/periods/:pid', authMiddleware, (req, res) => {
   const hire = db.hires.find(h => h.id === req.params.id);
   if (!hire) return res.status(404).json({ error: '新人记录不存在' });
+  if (req.user.role !== 'admin' && !isHireOwner(hire, req.user)) {
+    return res.status(403).json({ error: '无权操作' });
+  }
   hire.periods = (hire.periods||[]).filter(p => p.id !== req.params.pid);
   saveDb();
   res.json(hire);
@@ -1306,7 +1325,7 @@ app.delete('/api/hires/:id/periods/:pid', authMiddleware, (req, res) => {
 app.post('/api/hires/:id/periods/:pid/checkins', authMiddleware, (req, res) => {
   const hire = db.hires.find(h => h.id === req.params.id);
   if (!hire) return res.status(404).json({ error: '新人记录不存在' });
-  if (req.user.role !== 'admin' && hire.createdBy !== req.userId) {
+  if (req.user.role !== 'admin' && !isHireOwner(hire, req.user)) {
     return res.status(403).json({ error: '无权操作' });
   }
   const period = (hire.periods||[]).find(p => p.id === req.params.pid);

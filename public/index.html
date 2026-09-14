@@ -651,6 +651,18 @@ let auth = { token: '', userId: '', username: '', displayName: '', role: '' };
 
 function isAdmin() { return auth.role === 'admin'; }
 
+// 判断当前登录用户是否是某条新人随访的归属人
+// 规则：hire.owner 存在时按姓名匹配；为空时回退到 createdBy（兼容历史/手动建档）
+function isHireOwner(h) {
+  if (!h) return false;
+  const ownerName = (h.owner || '').toString().trim();
+  if (ownerName) {
+    return ownerName === (auth.displayName || '').toString().trim() ||
+           ownerName === (auth.username || '').toString().trim();
+  }
+  return h.createdBy === auth.userId;
+}
+
 // ==================== API Helpers ====================
 async function api(path, options = {}) {
   const headers = { 'Content-Type': 'application/json' };
@@ -2048,7 +2060,7 @@ function renderFollowUp(hires, templates) {
       return;
     }
     container.innerHTML = hires.map(h => {
-      const canModify = isAdmin() || h.createdBy === auth.userId;
+      const canModify = isAdmin() || isHireOwner(h);
       const periods = h.periods || [];
       const totalCheckins = periods.reduce((sum,p) => sum + (p.checkins||[]).length, 0);
       const ownerName = (h.owner || '').toString().trim() || userMap[h.createdBy] || '';
