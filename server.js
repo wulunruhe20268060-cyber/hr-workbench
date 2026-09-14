@@ -1017,52 +1017,69 @@ function slotKeyOf(name) {
 }
 // 标准8周期顺序（用于排序与批量生成）：第1天、第1周、第2周、第1个月、第6周、第2个月、第10周、第3个月
 const STANDARD_PERIOD_ORDER = ['d1', 'w1', 'w2', 'm1', 'w6', 'm2', 'w10', 'm3'];
-// 按岗位匹配某阶段的访谈模板：岗位专属模板优先，其次全岗位通用模板
-function templateForSlot(positionName, slotKw) {
-  const posKw = positionName === '软件销售' ? ['软件销售', '销售新人']
-    : positionName === '财税销售' ? ['财税销售', '销售新人']
-    : [positionName];
-  const pool = (db.templates || []).filter(t =>
-    (t.name || '').includes(positionName) || posKw.some(k => (t.name || '').includes(k)));
-  const exact = pool.find(t => (t.name || '').includes(slotKw));
-  if (exact) return exact;
-  // 全岗位通用模板兜底（如"新人第一天（全岗位）"）
-  const generic = (db.templates || []).find(t => (t.name || '').includes(slotKw));
-  if (generic) return generic;
-  return pool[0] || null;
+// 标准 8 个周期槽位（name 展示名，slot 归一化键）
+const STANDARD_SLOTS = [
+  { name: '第1天', slot: 'd1' }, { name: '第1周', slot: 'w1' }, { name: '第2周', slot: 'w2' },
+  { name: '第1个月', slot: 'm1' }, { name: '第6周', slot: 'w6' },
+  { name: '第2个月', slot: 'm2' }, { name: '第10周', slot: 'w10' }, { name: '第3个月', slot: 'm3' }
+];
+// 模板按名称判别其「适用范围」：软件销售 / 财税销售 / 财税顾问 / 销售(销售新人通用) / 通用(全岗位) / 空
+function scopeOfTemplateName(name) {
+  const n = name || '';
+  if (n.includes('软件销售')) return '软件销售';
+  if (n.includes('财税销售')) return '财税销售';
+  if (n.includes('财税顾问')) return '财税顾问';
+  if (n.includes('销售新人') || (n.includes('销售') && !n.includes('财税'))) return '销售';
+  if (n.includes('全岗位') || n.includes('通用')) return '通用';
+  return '';
+}
+// 按「岗位 + 周期槽位」精确匹配模板：岗位专属优先，其次销售通用，再次全岗位通用，最后任意同槽位模板。
+// 彻底杜绝“某周期的随访套用了第一周模板”这类错配——每个槽位只取属于它自己阶段的模板。
+function templateForSlot(positionName, slot) {
+  const inSlot = (db.templates || []).filter(t => slotKeyOf(t.name) === slot);
+  if (!inSlot.length) return null;
+  const scopes = [positionName, '销售', '通用', ''];
+  for (const sc of scopes) {
+    const m = inSlot.find(t => scopeOfTemplateName(t.name) === sc);
+    if (m) return m;
+  }
+  return inSlot[0];
 }
 // 按岗位访谈模板生成新人随访周期：标准 8 个槽位，各槽位套用对应阶段的模板
 function buildProbationPeriods(positionName) {
-  const slots = [
-    { name: '第1天', kw: '第一天' }, { name: '第1周', kw: '第一周' }, { name: '第2周', kw: '第二周' },
-    { name: '第1个月', kw: '第一个月' }, { name: '第6周', kw: '第六周' },
-    { name: '第2个月', kw: '第二个月' }, { name: '第10周', kw: '第十周' }, { name: '第3个月', kw: '第三个月' }
-  ];
-  return slots.map(s => {
-    const t = templateForSlot(positionName, s.kw);
-    return { id: genId(), name: s.name, templateId: t ? t.id : '', questions: t ? [...(t.questions || [])] : [], checkins: [] };
+  return STANDARD_SLOTS.map(s => {
+    const t = templateForSlot(positionName, s.slot);
+    return { id: genId(), name: s.name, slot: s.slot, templateId: t ? t.id : '', questions: t ? [...(t.questions || [])] : [], checkins: [] };
   });
 }
-// 修复/补齐新人随访周期：保持 8 个标准槽位且带模板题，同时保留已有随访记录（按周期名槽位归位）
+// 修复/补齐新人随访周期：保持 8 个标准槽位且带正确阶段模板题，同时保留已有随访记录（按周期槽位归位）
 function healHirePeriods(h) {
   const desired = buildProbationPeriods(h.position || '');
   const byKey = {};
-  (h.periods || []).forEach(p => { const k = slotKeyOf(p.name) || p.name; (byKey[k] = byKey[k] || []).push(p); });
+  (h.periods || []).forEach(p => { const k = p.slot || slotKeyOf(p.name) || p.name; (byKey[k] = byKey[k] || []).push(p); });
   let changed = false;
   const merged = desired.map(slot => {
-    const olds = byKey[slotKeyOf(slot.name)] || [];
+    const olds = byKey[slot.slot] || [];
     const old = olds.find(p => (p.checkins || []).length) || olds[0];
     if (!old) { changed = true; return slot; }
+    const correct = templateForSlot(h.position || '', slot.slot);
+    let templateId = old.templateId || (correct ? correct.id : '');
     let questions = old.questions || [];
-    let templateId = old.templateId || '';
-    if (!questions.length && slot.questions.length) { questions = slot.questions; templateId = slot.templateId; changed = true; }
-    return { id: old.id || slot.id, name: slot.name, templateId, questions, checkins: old.checkins || [] };
+    // 当前绑定模板的真实所属阶段
+    const oldTpl = (db.templates || []).find(t => t.id === old.templateId);
+    const oldTplSlot = oldTpl ? slotKeyOf(oldTpl.name) : '';
+    // 周期无问题，或当前绑定模板并非本周期所属阶段（如第二周错绑了第一周模板）
+    // → 用正确阶段模板刷新，杜绝“随访问题全是第一周”的错配
+    if (!questions.length || (oldTplSlot && oldTplSlot !== slot.slot)) {
+      if (correct) { templateId = correct.id; questions = [...(correct.questions || [])]; changed = true; }
+    }
+    return { id: old.id || slot.id, name: slot.name, slot: slot.slot, templateId, questions, checkins: old.checkins || [] };
   });
-  // 6 槽之外的历史周期仅在有随访记录时保留（避免误删用户自建周期的随访数据）
+  // 8 槽之外的历史周期仅在有随访记录时保留（避免误删用户自建周期的随访数据）
   const extra = (h.periods || []).filter(p => {
     if (!(p.checkins || []).length) return false;
-    const k = slotKeyOf(p.name);
-    return !k || !desired.some(s => slotKeyOf(s.name) === k);
+    const k = p.slot || slotKeyOf(p.name);
+    return !k || !desired.some(s => s.slot === k);
   });
   if (merged.length + extra.length !== (h.periods || []).length) changed = true;
   h.periods = merged.concat(extra);
@@ -2123,6 +2140,15 @@ app.get('*', (req, res) => {
   }
   // 每月1号启动时自动归档上个月的招聘看板快照（幂等，不影响既有归档）
   try { maybeAutoArchiveBoard(); } catch (e) { console.error('boot: board auto-archive error:', e.message); }
+  // 随访周期自愈（每次启动都跑，幂等）：按各周期所属阶段重新套用正确模板、补齐缺失标准周期、
+  // 纠正「某周期错绑了第一周模板 / 随访问题全是第一周」等错配，杜绝销售岗位再次出现该问题。
+  if (!bootFreshSeed) {
+    try {
+      let healed = 0;
+      (db.hires || []).forEach(h => { if (healHirePeriods(h)) healed++; });
+      if (healed) { await saveDb(); console.log('boot: healed ' + healed + ' hire follow-up period set(s)'); }
+    } catch (e) { console.error('boot: follow-up period heal error:', e.message); }
+  }
   // 若本次从文件存储迁移了数据到 Postgres，立即落库，确保不丢失
   if (migratedFromFile) {
     try { await saveDb(); console.log('Migrated existing file data into Postgres (persisted)'); }
