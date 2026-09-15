@@ -704,10 +704,10 @@ app.post('/api/interviews/batch-upsert', authMiddleware, (req, res) => {
   const now = new Date().toISOString().split('T')[0];
   let updated = 0, added = 0;
   items.forEach(item => {
-    // 先按手机号、再按「姓名+岗位」定位（身份唯一，避免重复建档；不再加 createdBy 限制，防止同人重复）
+    // 按「姓名 + 手机号」双重匹配识别同一人（优先）；手机号为空时回退「姓名 + 岗位」定位，避免重复建档。
     let existing = null;
-    if (item.phone) {
-      existing = db.interviews.find(iv => iv.phone === item.phone);
+    if (item.name && item.phone) {
+      existing = db.interviews.find(iv => iv.name === item.name && iv.phone === item.phone);
     }
     if (!existing && item.name && item.position) {
       existing = db.interviews.find(iv => iv.name === item.name && iv.position === item.position);
