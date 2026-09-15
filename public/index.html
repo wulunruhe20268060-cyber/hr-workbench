@@ -350,6 +350,9 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 .tag-wait{background:#E8F3FF;color:#0E42D2}
 .creator-tag{font-size:10px;color:var(--text2);background:rgba(255,255,255,0.7);padding:1px 6px;border-radius:4px;margin-left:4px}
 /* Todo */
+.todo-control-bar{display:flex;flex-wrap:nowrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.todo-control-bar .todo-subtabs{margin-bottom:0;flex:0 0 auto}
+.admin-hint-inline{display:block;font-size:11px;color:var(--text2);font-style:italic;margin-top:4px;padding:4px 8px;background:#F5F7FA;border-radius:6px;border-left:3px solid rgba(64,158,255,0.3)}
 .todo-subtabs{display:flex;gap:0;margin-bottom:16px}
 .todo-subtab{padding:8px 20px;border:1px solid rgba(64,158,255,0.15);background:#fff;cursor:pointer;font-size:14px;font-weight:500;font-family:inherit;min-height:40px;transition:all .15s}
 .todo-subtab:first-child{border-radius:8px 0 0 8px}
@@ -389,6 +392,14 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 .category-group:not(.open) .category-toggle{transform:rotate(0deg)}
 .category-body{padding:8px 0 0 0;max-height:2000px;overflow:hidden;transition:max-height .3s ease}
 .category-group:not(.open) .category-body{max-height:0;padding:0}
+/* 分类横向标签行 */
+.category-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.category-tab{display:flex;align-items:center;gap:6px;padding:8px 12px;background:#fff;border:1px solid rgba(64,158,255,0.15);border-radius:8px;cursor:pointer;user-select:none;transition:all .18s;box-shadow:0 2px 8px rgba(0,0,0,0.06);font-size:14px}
+.category-tab:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(64,158,255,0.12)}
+.category-tab.active{background:var(--primary-light);border-color:var(--primary)}
+.category-tab-icon{font-size:16px}
+.category-tab-name{font-weight:600}
+.category-tab-count{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600}
 .hire-card{background:#fff;border-radius:8px;padding:14px;margin-bottom:8px;border:1px solid rgba(64,158,255,0.15);box-shadow:0 2px 8px rgba(0,0,0,0.06);transition:all .18s}
 .hire-card:hover{box-shadow:0 8px 20px rgba(64,158,255,0.12)}
 .hire-card-header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;cursor:pointer;padding:6px 8px;margin:-6px -8px;border-radius:6px;transition:background .15s}
@@ -1239,16 +1250,16 @@ async function renderBoard(positions, boardHistory) {
   html += `</div>`;
   
   html += `<div class="card"><div class="card-header"><h2>岗位详情</h2></div>`;
-  html += `<div class="search-filter-bar">
-    <input class="search-input" id="posSearch" placeholder="搜索岗位 / 部门" oninput="filterPositions()">
-    <select class="filter-select" id="posFlow" onchange="filterPositions()">
+  html += `<div class="search-filter-bar" style="flex-wrap:nowrap;gap:10px">
+    <input class="search-input" id="posSearch" style="flex:2 1 0;min-width:0" placeholder="搜索岗位 / 部门" oninput="filterPositions()">
+    <select class="filter-select" id="posFlow" style="flex:1 1 0;min-width:0" onchange="filterPositions()">
       <option value="">全部流程</option>
       <option value="overdue">已逾期</option>
       <option value="gap">有缺口</option>
       <option value="full">已满员</option>
     </select>
-    <button class="btn btn-primary btn-sm" onclick="filterPositions()">查询</button>
-    <button class="btn btn-outline btn-sm" onclick="resetPosFilter()">重置</button>
+    <button class="btn btn-primary btn-sm" style="flex:0 0 auto" onclick="filterPositions()">查询</button>
+    <button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="resetPosFilter()">重置</button>
   </div>`;
   if (positions.length===0) {
     html += `<div style="text-align:center;color:var(--text2);padding:20px">暂无岗位${canEdit?'，点击上方按钮新增':''}</div>`;
@@ -1889,31 +1900,31 @@ async function renderTodos(todos) {
   const total = activeTodos.length + doneTodos.length;
   const pct = total>0 ? Math.round((doneTodos.length/total)*100) : 0;
   
+  const r=26, circ=2*Math.PI*r, offset=circ-(pct/100)*circ;
+  const adminHint = isAdmin() ? `<span class="admin-hint-inline">管理员视图：可查看所有成员的待办事项</span>` : '';
   let html = `<div class="card">
     <div class="card-header"><h2>待办事项</h2>
       <button class="btn btn-primary btn-sm" onclick="showAddTodo()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>新增待办
       </button>
     </div>
-    <div class="todo-subtabs">
-      <button class="todo-subtab ${freqFilter==='日'?'active':''}" onclick="switchTodoFreq('日')">每日</button>
-      <button class="todo-subtab ${freqFilter==='周'?'active':''}" onclick="switchTodoFreq('周')">每周</button>
-      <button class="todo-subtab ${freqFilter==='月'?'active':''}" onclick="switchTodoFreq('月')">每月</button>
-    </div>`;
-  
-  if (isAdmin()) html += `<div class="admin-hint">管理员视图：可查看所有成员的待办事项</div>`;
-  
-  const r=26, circ=2*Math.PI*r, offset=circ-(pct/100)*circ;
-  html += `<div class="progress-section">
-    <div class="progress-ring">
-      <svg width="64" height="64" viewBox="0 0 64 64">
-        <circle cx="32" cy="32" r="${r}" fill="none" stroke="#E5E6EB" stroke-width="6"/>
-        <circle cx="32" cy="32" r="${r}" fill="none" stroke="${pct===100?'#00B42A':'#165DFF'}" stroke-width="6" stroke-dasharray="${circ}" stroke-dashoffset="${offset}" stroke-linecap="round"/>
-      </svg>
-      <div class="progress-ring-text" style="color:${pct===100?'#00B42A':'#165DFF'}">${pct}%</div>
-    </div>
-    <div class="progress-info">已完成 <strong>${doneTodos.length}</strong> / ${total} 项</div>
-  </div></div>`;
+    <div class="todo-control-bar">
+      <div class="todo-subtabs">
+        <button class="todo-subtab ${freqFilter==='日'?'active':''}" onclick="switchTodoFreq('日')">每日</button>
+        <button class="todo-subtab ${freqFilter==='周'?'active':''}" onclick="switchTodoFreq('周')">每周</button>
+        <button class="todo-subtab ${freqFilter==='月'?'active':''}" onclick="switchTodoFreq('月')">每月</button>
+      </div>
+      <div class="progress-section" style="margin:0;flex:0 0 auto;background:transparent;box-shadow:none;padding:0;gap:10px">
+        <div class="progress-ring" style="width:48px;height:48px">
+          <svg width="48" height="48" viewBox="0 0 48 48">
+            <circle cx="24" cy="24" r="18" fill="none" stroke="#E5E6EB" stroke-width="5"/>
+            <circle cx="24" cy="24" r="18" fill="none" stroke="${pct===100?'#00B42A':'#165DFF'}" stroke-width="5" stroke-dasharray="${2*Math.PI*18}" stroke-dashoffset="${2*Math.PI*18 - (pct/100)*(2*Math.PI*18)}" stroke-linecap="round"/>
+          </svg>
+          <div class="progress-ring-text" style="color:${pct===100?'#00B42A':'#165DFF'};font-size:11px">${pct}%</div>
+        </div>
+        <div class="progress-info" style="font-size:13px">已完成 <strong>${doneTodos.length}</strong> / ${total} 项${adminHint}</div>
+      </div>
+    </div></div>`;
   
   // Load users for display
   let users=[], userMap={};
@@ -2094,20 +2105,23 @@ function renderFollowUp(hires, templates) {
   if (templates.length === 0) {
     categoryHtml = `<div style="text-align:center;color:var(--text2);padding:12px">暂无模板，点击右上角新建</div>`;
   } else {
+    // 分类标签行：所有分类横向排成一行
+    categoryHtml += `<div class="category-tabs">` +
+      allCats.map(cat => {
+        const tpls = grouped[cat] || [];
+        const color = categoryColors[cat] || '#666666';
+        const icon = categoryIcons[cat] || '📁';
+        return `<div class="category-tab" data-cat="${cat}" onclick="toggleCategory('${cat}')">
+          <span class="category-tab-icon">${icon}</span>
+          <span class="category-tab-name" style="color:${color}">${escapeHtml(cat)}</span>
+          <span class="category-tab-count" style="background:${color}20;color:${color}">${tpls.length}</span>
+        </div>`;
+      }).join('') +
+    `</div>`;
+    // 分类内容区：默认折叠
     allCats.forEach((cat, idx) => {
       const tpls = grouped[cat] || [];
-      const color = categoryColors[cat] || '#666666';
-      const icon = categoryIcons[cat] || '📁';
-      const open = ''; // all categories collapsed by default
-      categoryHtml += `<div class="category-group${open}" data-cat="${cat}">
-        <div class="category-header" onclick="toggleCategory(this)">
-          <div style="display:flex;align-items:center;gap:8px">
-            <span class="category-toggle">▶</span>
-            <span style="font-size:16px">${icon}</span>
-            <span style="font-weight:600;color:${color}">${escapeHtml(cat)}</span>
-            <span style="background:${color}20;color:${color};font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600">${tpls.length}</span>
-          </div>
-        </div>
+      categoryHtml += `<div class="category-group" data-cat="${cat}">
         <div class="category-body">
           ${tpls.map(renderTemplateCard).join('')}
         </div>
@@ -2494,11 +2508,12 @@ function showAddTemplate(editId) {
   }
 }
 
-function toggleCategory(el) {
-  const group = el.parentElement;
+function toggleCategory(cat) {
+  const group = document.querySelector(`.category-group[data-cat="${cat}"]`);
+  if (!group) return;
   group.classList.toggle('open');
-  const toggle = el.querySelector('.category-toggle');
-  if (toggle) toggle.textContent = group.classList.contains('open') ? '▼' : '▶';
+  const tab = document.querySelector(`.category-tab[data-cat="${cat}"]`);
+  if (tab) tab.classList.toggle('active', group.classList.contains('open'));
 }
 
 function addQuestionRow() {
