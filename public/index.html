@@ -6,6 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>HR全流程工作台 - 团队版</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -781,11 +784,7 @@ async function doLogin() {
       return;
     }
     auth = data;
-    document.getElementById('loginOverlay').style.display = 'none';
-    document.getElementById('mainApp').style.display = '';
-    updateHeader();
-    await render();
-    // 记住账号密码：勾选则保存，未勾选则清除
+    // 记住账号密码：登录成功后立即落盘（放在渲染之前，确保 render 即便抛错也不会漏存）
     try {
       if (document.getElementById('rememberMe').checked) {
         localStorage.setItem('hrwb_remember', JSON.stringify({ username, password }));
@@ -793,6 +792,10 @@ async function doLogin() {
         localStorage.removeItem('hrwb_remember');
       }
     } catch(e) {}
+    document.getElementById('loginOverlay').style.display = 'none';
+    document.getElementById('mainApp').style.display = '';
+    updateHeader();
+    await render();
     // Check for old localStorage data
     checkLocalStorageMigration();
   } catch(e) {
