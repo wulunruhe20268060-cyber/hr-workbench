@@ -966,18 +966,20 @@ function updateBatchDeleteBar() {
 var interviewPage = 1, interviewPageSize = 10;
 var contractPage = 1, contractPageSize = 10;
 
-function renderPagination(total, currentPage, pageSize, prefix) {
+function renderPagination(total, currentPage, pageSize, prefix, opts={}) {
   const totalPages = Math.ceil(total / pageSize);
-  if (totalPages <= 1) return '';
-  let html = `<div class="pagination">
-    <span style="font-size:12px;color:var(--text2);margin-right:8px">共 ${total} 条</span>
-    <select onchange="window['${prefix}PageSize']=parseInt(this.value);window['${prefix}Page']=1;render()" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+  const showCount = opts.showCount !== false;
+  const showPageSize = opts.showPageSize !== false;
+  if (totalPages <= 1 && !showCount && !showPageSize) return '';
+  let html = `<div class="pagination">`;
+  if (showCount) html += `<span style="font-size:12px;color:var(--text2);margin-right:8px">共 ${total} 条</span>`;
+  if (showPageSize) html += `<select onchange="window['${prefix}PageSize']=parseInt(this.value);window['${prefix}Page']=1;render()" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
       <option value="10" ${pageSize===10?'selected':''}>10条/页</option>
       <option value="20" ${pageSize===20?'selected':''}>20条/页</option>
       <option value="50" ${pageSize===50?'selected':''}>50条/页</option>
     </select>`;
   for (let i = 1; i <= totalPages; i++) {
-    html += `<button class="btn btn-outline btn-xs pagination-btn" style="min-width:28px" onclick="window['${prefix}Page']=${i};render()">${i}</button>`;
+    html += `<button class="btn btn-outline btn-xs pagination-btn ${currentPage===i?'active':''}" style="min-width:28px" onclick="window['${prefix}Page']=${i};render()">${i}</button>`;
   }
   html += `</div>`;
   return html;
@@ -1496,6 +1498,11 @@ async function renderInterviews(interviews, positions) {
     <input class="search-input" id="filtSearch" style="flex:2 1 0;min-width:0" placeholder="搜索姓名 / 学历 / 性别 / 岗位 / 电话 / 渠道 / 面试官 / 备注" oninput="filterInterviews()">
     <select class="filter-select" id="filtResult" style="flex:1 1 0;min-width:0" onchange="filterInterviews()"><option value="">全部结果</option>${resultOptions.map(r => `<option>${escapeHtml(r)}</option>`).join('')}</select>
     <select class="filter-select" id="filtPos" style="flex:1 1 0;min-width:0" onchange="filterInterviews()"><option value="">全部岗位</option>${positions.map(p => `<option>${escapeHtml(p.position)}</option>`).join('')}</select>
+    <select class="filter-select" id="filtPageSize" style="flex:1 1 0;min-width:0" onchange="interviewPageSize=parseInt(this.value);interviewPage=1;filterInterviews()">
+      <option value="10" ${interviewPageSize===10?'selected':''}>10条/页</option>
+      <option value="20" ${interviewPageSize===20?'selected':''}>20条/页</option>
+      <option value="50" ${interviewPageSize===50?'selected':''}>50条/页</option>
+    </select>
   </div>`;
 
   // Cache data for filtering
@@ -1553,7 +1560,7 @@ function filterInterviews() {
         else tag='<span class="tag tag-wait">待面试</span>';
         const d1 = iv.firstInterviewDate||'-';
         const d2 = iv.secondInterviewDate||'-';
-        const d3 = iv.departureDate||'-';
+        const d3 = iv.departureDate || extractDepartureFromNotes(iv.notes) || '-';
         const seqNum = (interviewPage - 1) * interviewPageSize + idx + 1;
         return `<tr>
           <td style="white-space:nowrap"><input type="checkbox" class="row-checkbox" data-id="${iv.id}" onchange="updateBatchDeleteBar()"></td>
@@ -1572,8 +1579,9 @@ function filterInterviews() {
             ${canModify?`<button class="btn btn-outline btn-xs" onclick="editInterview('${iv.id}')">编辑</button><button class="btn btn-danger btn-xs" onclick="deleteInterview('${iv.id}')">删除</button>`:`<span style="font-size:11px;color:var(--text2)">只读</span>`}
           </td>
         </tr>`;
-      }).join('') + renderPagination(filtered.length, interviewPage, interviewPageSize, 'interview'); })()}
-    </table></div>`;
+      }).join('') + `</table></div>` +
+      renderPagination(filtered.length, interviewPage, interviewPageSize, 'interview', {showCount:false, showPageSize:false}) +
+      `<div style="text-align:center;padding:8px 0;font-size:12px;color:var(--text2)">共 ${filtered.length} 条</div>`; })()}`;
 }
 
 function showAddInterview(editId) {
