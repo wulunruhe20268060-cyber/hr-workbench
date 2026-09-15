@@ -1492,10 +1492,10 @@ async function renderInterviews(interviews, positions) {
   
   const resultOptions = ['待面试','通过','待定','淘汰'];
   
-  html += `<div class="search-filter-bar">
-    <input class="search-input" id="filtSearch" placeholder="搜索姓名 / 学历 / 性别 / 岗位 / 电话 / 渠道 / 面试官 / 备注" oninput="filterInterviews()">
-    <select class="filter-select" id="filtResult" onchange="filterInterviews()"><option value="">全部结果</option>${resultOptions.map(r => `<option>${escapeHtml(r)}</option>`).join('')}</select>
-    <select class="filter-select" id="filtPos" onchange="filterInterviews()"><option value="">全部岗位</option>${positions.map(p => `<option>${escapeHtml(p.position)}</option>`).join('')}</select>
+  html += `<div class="search-filter-bar" style="flex-wrap:nowrap;gap:10px">
+    <input class="search-input" id="filtSearch" style="flex:2 1 0;min-width:0" placeholder="搜索姓名 / 学历 / 性别 / 岗位 / 电话 / 渠道 / 面试官 / 备注" oninput="filterInterviews()">
+    <select class="filter-select" id="filtResult" style="flex:1 1 0;min-width:0" onchange="filterInterviews()"><option value="">全部结果</option>${resultOptions.map(r => `<option>${escapeHtml(r)}</option>`).join('')}</select>
+    <select class="filter-select" id="filtPos" style="flex:1 1 0;min-width:0" onchange="filterInterviews()"><option value="">全部岗位</option>${positions.map(p => `<option>${escapeHtml(p.position)}</option>`).join('')}</select>
   </div>`;
 
   // Cache data for filtering
@@ -1525,7 +1525,12 @@ function filterInterviews() {
       return hay.includes(kw);
     });
   }
-  filtered.sort((a,b) => (b.firstInterviewDate||'').localeCompare(a.firstInterviewDate||''));
+  filtered.sort((a,b) => {
+    const aHasEntry = a.secondInterviewDate ? 1 : 0;
+    const bHasEntry = b.secondInterviewDate ? 1 : 0;
+    if (aHasEntry !== bHasEntry) return bHasEntry - aHasEntry;
+    return (b.firstInterviewDate||'').localeCompare(a.firstInterviewDate||'');
+  });
     
     const tableEl = document.getElementById('interviewTableContainer');
     if (!tableEl) return;
