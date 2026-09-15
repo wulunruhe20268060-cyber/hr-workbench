@@ -1795,16 +1795,28 @@ function matchDateInText(text) {
   if ((m = text.match(/(\d{1,2})[-/.](\d{1,2})(?![-\d])/))) return normalizeDateParts('', m[1], m[2]);
   return '';
 }
-// 从「备注」中提取「离职时间」后的日期。例：备注="该候选人离职时间2026/09/10，因个人原因"
+// 从「备注」中提取离职日期。支持：
+//   "离职时间2026/09/10" / "8.10离职" / "2026-09-10 离职" / "9月10日离职" 等
 function extractDepartureFromNotes(notes) {
   if (!notes) return '';
-  const kw = '离职时间';
   const s = String(notes);
+  if (!s.includes('离职')) return '';
+
+  // 1. 优先解析「离职时间」关键字后面的日期
+  const kw = '离职时间';
   const idx = s.indexOf(kw);
-  if (idx < 0) return '';
-  const after = s.slice(idx + kw.length, idx + kw.length + 24);
-  const cleaned = after.replace(/^[\s:：:、\-–—]+/, '');
-  return matchDateInText(cleaned) || matchDateInText(after);
+  if (idx >= 0) {
+    const after = s.slice(idx + kw.length, idx + kw.length + 24);
+    const cleaned = after.replace(/^[\s:：:、\-–—]+/, '');
+    const d = matchDateInText(cleaned) || matchDateInText(after);
+    if (d) return d;
+  }
+
+  // 2. 解析「离职」关键字附近的日期（前面或后面）
+  const liIdx = s.indexOf('离职');
+  const beforeWindow = s.slice(Math.max(0, liIdx - 20), liIdx);
+  const afterWindow = s.slice(liIdx + 2, liIdx + 2 + 24);
+  return matchDateInText(beforeWindow) || matchDateInText(afterWindow) || '';
 }
 
 // CSV file upload handler for interviews
