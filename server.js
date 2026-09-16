@@ -193,7 +193,7 @@ function seedDb() {
   }
 
   // Interviews
-  db.interviews = [
+  if (!db.interviews || db.interviews.length === 0) db.interviews = [
     { id: genId(), name: '李明', position: '高级前端工程师', phone: '13812345678',
       education: '本科', gender: '男', inviter: '张主管', source: 'BOSS直聘',
       firstInterviewDate: now, secondInterviewDate: '', interviewer: '张主管',
@@ -226,8 +226,10 @@ function seedDb() {
   ];
 
   // Hires (with period-based follow-up)
+  // 保护历史随访记录：已有数据时不覆盖，避免重新部署后丢失用户录入的随访数据
+  const hasHires = db.hires && db.hires.length > 0;
   const h1Id = genId();
-  db.hires = [
+  if (!hasHires) db.hires = [
     { id: h1Id, name: '陈静', position: '产品经理', dept: '产品部', entryDate: '2026-07-15',
       periods: [
         { id: genId(), name: '第1周', templateId: tpl1Id, questions: tpl1Id ? db.templates.find(t=>t.id===tpl1Id)?.questions||[] : [],
@@ -258,7 +260,7 @@ function seedDb() {
   ];
 
   // Progress table (matches the Excel template)
-  db.progress = [
+  if (!db.progress || db.progress.length === 0) db.progress = [
     { id: genId(), position: '软件销售', headcount: 2, priority: '高', urgency: '高', difficulty: '中',
       planNode: '', week1: 0, week2: 0, week3: 0, week4: 0,
       totalEntry: 0, shortage: 2, completion: '0%', notes: '', createdBy: adminId, createdAt: now },
@@ -280,7 +282,7 @@ function seedDb() {
   ];
 
   // Contracts (labor contracts)
-  db.contracts = [
+  if (!db.contracts || db.contracts.length === 0) db.contracts = [
     { id: genId(), seq: 1, name: '李明', dept: '技术部', entryDate: '2026-07-01', signDate: '2026-07-01', duration: 1, endDate: '2027-07-01', signUnit: 'HR工作台有限公司', notes: '', createdBy: m1Id, createdAt: ys },
     { id: genId(), seq: 2, name: '王芳', dept: '人力资源部', entryDate: '2026-06-01', signDate: '2026-06-01', duration: 3, endDate: '2029-06-01', signUnit: 'HR工作台有限公司', notes: '三年期', createdBy: m1Id, createdAt: ys },
     { id: genId(), seq: 3, name: '测试员工', dept: '市场部', entryDate: '2026-07-01', signDate: '2026-07-01', duration: 1, endDate: '2026-08-08', signUnit: 'HR工作台有限公司', notes: '即将到期，需催办', createdBy: m1Id, createdAt: ys }
@@ -1465,6 +1467,39 @@ app.post('/api/hires/:id/periods/:pid/checkins', authMiddleware, (req, res) => {
   period.checkins.push({ id: genId(), ...req.body });
   saveDb();
   res.json(hire);
+});
+
+// 导出新人随访记录（JSON 下载）
+app.get('/api/hires/export', authMiddleware, (req, res) => {
+  const data = db.hires || [];
+  const filename = 'follow_up_backup_' + new Date().toISOString().split('T')[0] + '.json';
+  res.setHeader('Content-Disposition', 'attachment; filename="' + filename + '"');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.send(JSON.stringify(data, null, 2));
+});
+
+// 导入新人随访记录（adminOnly，支持合并或覆盖）
+app.post('/api/hires/import', authMiddleware, adminOnly, (req, res) => {
+  const { hires, mode } = req.body || {};
+  if (!Array.isArray(hires)) return res.status(400).json({ error: 'hires 必须是数组' });
+  const importMode = (mode || 'merge').toString().trim(); // 'merge' | 'overwrite'
+  let added = 0, updated = 0, skipped = 0;
+  if (importMode === 'overwrite') {
+    db.hires = hires.map(h => ({ ...h, _importedAt: new Date().toISOString() }));
+    added = hires.length;
+  } else {
+    // merge: 按 id 匹配，存在则覆盖，不存在则追加
+    const existingMap = new Map((db.hires || []).map(h => [h.id, h]));
+    hires.forEach(h => {
+      if (!h.id) { db.hires.push({ ...h, id: genId(), _importedAt: new Date().toISOString() }); added++; }
+      else if (existingMap.has(h.id)) {
+        const idx = db.hires.findIndex(x => x.id === h.id);
+        if (idx !== -1) { db.hires[idx] = { ...h, _importedAt: new Date().toISOString() }; updated++; }
+      } else { db.hires.push({ ...h, _importedAt: new Date().toISOString() }); added++; }
+    });
+  }
+  saveDb();
+  res.json({ ok: true, mode: importMode, added, updated, skipped, total: db.hires.length });
 });
 
 // ========== Progress Table (Recruitment Progress) ==========

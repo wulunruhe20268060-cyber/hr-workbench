@@ -2224,6 +2224,8 @@ function renderFollowUp(hires, templates) {
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-outline btn-sm" onclick="toggleAllHires(false)">全部收起</button>
         <button class="btn btn-outline btn-sm" onclick="toggleAllHires(true)">全部展开</button>
+        ${isAdmin() ? `<button class="btn btn-outline btn-sm" onclick="exportHires()">导出随访记录</button>` : ''}
+        ${isAdmin() ? `<button class="btn btn-outline btn-sm" onclick="importHires()">导入随访记录</button>` : ''}
         <button class="btn btn-primary btn-sm" onclick="showAddHire()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>添加新人
         </button>
@@ -2806,6 +2808,47 @@ async function exportHire(hireId) {
     downloadBlob(html2, h.name + '_随访记录_' + today() + '.xls', 'application/vnd.ms-excel;charset=utf-8');
     showToast('已导出 ' + h.name);
   } catch (e) { showToast(e.message); }
+}
+
+// 导出全部随访记录（JSON 备份）
+async function exportHires() {
+  if (!isAdmin()) { showToast('仅管理员可导出全部随访记录'); return; }
+  try {
+    const token = auth ? (auth.token || '') : '';
+    const url = '/api/hires/export' + (token ? '?t=' + encodeURIComponent(token) : '');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'follow_up_backup_' + today() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast('随访记录已导出');
+  } catch (e) { showToast('导出失败'); }
+}
+
+// 导入随访记录（JSON 恢复）
+function importHires() {
+  if (!isAdmin()) { showToast('仅管理员可导入随访记录'); return; }
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async function(ev) {
+      try {
+        const hires = JSON.parse(ev.target.result);
+        if (!Array.isArray(hires)) { showToast('文件格式错误：根节点必须是数组'); return; }
+        const mode = confirm('点击「确定」执行合并导入（同 ID 覆盖，新 ID 追加）；点击「取消」执行全覆盖（清空现有记录后导入）。') ? 'merge' : 'overwrite';
+        const res = await apiPost('/api/hires/import', { hires, mode });
+        await render();
+        showToast(`导入完成：新增 ${res.added} 条，更新 ${res.updated} 条，共 ${res.total} 条`);
+      } catch (err) { showToast('导入失败：' + (err.message || '请检查 JSON 格式')); }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
 }
 
 // 招聘进度表默认显示当前月（不同月份的入职/流失数据按月隔离，不混合）
