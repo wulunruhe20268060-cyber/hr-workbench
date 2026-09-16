@@ -1016,21 +1016,6 @@ function bIsOnboarded(iv){
   const dep = ((iv&&iv.departureDate||'').toString().trim()!=='' && (iv&&iv.departureDate||'').toString().trim()!=='-') || kw.some(k=>notes.includes(k));
   return !dep;
 }
-// 统计某岗位：简历数(当月新建面试记录)/初面数(当月初面)/本月入职/本年入职
-function boardStatsFor(posName, interviews, month, year){
-  let resume=0, firstIv=0, obMonth=0, obYear=0;
-  (interviews||[]).forEach(iv=>{
-    if(iv.position!==posName) return;
-    if(bMonthOf(iv.createdAt)===month) resume++;
-    if(iv.firstInterviewDate && bMonthOf(iv.firstInterviewDate)===month) firstIv++;
-    if(bIsOnboarded(iv)){
-      const m=bMonthOf(iv.secondInterviewDate), y=bYearOf(iv.secondInterviewDate);
-      if(m===month) obMonth++;
-      if(y===year) obYear++;
-    }
-  });
-  return {resume, firstIv, obMonth, obYear};
-}
 function daysUntil(d) { if(!d) return Infinity; return Math.ceil((new Date(d) - new Date(today())) / 86400000); }
 function escapeHtml(str) { if(str===null||str===undefined) return ''; str=String(str); return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
@@ -1082,10 +1067,11 @@ function getTodayItems(todos, interviews, hires, positions, contracts) {
     }
   });
   const _m = progressMonthStr(); const _y = _m.slice(0,4);
+  const _bm = boardOnboardMaps(_m, _y);
   positions.filter(p => p.status==='active').forEach(p => {
-    const st = boardStatsFor(p.position, interviews, _m, _y);
-    if ((p.headcount||0) > 0 && st.obYear < (p.headcount||0)) {
-      items.push({ type: 'position_gap', badge: warn('缺口岗位'), title: `${p.position}`, meta: `已入职 ${st.obYear}/${p.headcount||0}`, data: p, action: 'view_position' });
+    const st = boardStat(p.position, interviews, _m, _y, _bm);
+    if ((p.headcount||0) > 0 && st.obMonth < (p.headcount||0)) {
+      items.push({ type: 'position_gap', badge: warn('缺口岗位'), title: `${p.position}`, meta: `本月入职 ${st.obMonth}/${p.headcount||0}`, data: p, action: 'view_position' });
     }
   });
   return items;
@@ -1246,6 +1232,38 @@ async function renderTeamOverview(positions, interviews, todos, hires, users) {
 
 // ==================== Module 0: Recruitment Board ====================
 let boardHistoryCache = [];
+let currentProgress = [];      // 当前招聘进度月数据（render 中填充）
+let boardHistoryGlobal = [];   // 历史看板归档（render 中填充）
+
+// 入职数数据来源：
+//  - 本月入职：直接取「招聘进度模块」当月各岗位 totalEntry（week1~4 合计）
+//  - 本年入职：本月入职 + 历史看板归档中当年更早月份的 onboard 累计
+function boardOnboardMaps(month, year) {
+  const progressOnboard = {};
+  (currentProgress || []).forEach(p => { progressOnboard[p.position] = (p.totalEntry || 0); });
+  const histOnboard = {};
+  (boardHistoryGlobal || []).forEach(h => {
+    if (h.month && h.month.slice(0,4) === year && h.month < month) {
+      (h.snapshot || []).forEach(p => {
+        histOnboard[p.position] = (histOnboard[p.position] || 0) + ((p.stages && p.stages.onboard) || 0);
+      });
+    }
+  });
+  return { progressOnboard, histOnboard };
+}
+// 岗位看板指标：简历/初面来自「面试管理」面试记录（按当前进度月统计）；入职数按招聘进度/历史看板
+function boardStat(posName, interviews, month, year, maps) {
+  let resume = 0, firstIv = 0;
+  (interviews || []).forEach(iv => {
+    if (iv.position !== posName) return;
+    if (bMonthOf(iv.createdAt) === month) resume++;
+    if (iv.firstInterviewDate && bMonthOf(iv.firstInterviewDate) === month) firstIv++;
+  });
+  const obMonth = maps.progressOnboard[posName] || 0;          // 本月入职：招聘进度当月 totalEntry
+  const obYear = obMonth + (maps.histOnboard[posName] || 0);   // 本年入职：本月 + 历史看板当年更早月份
+  return { resume, firstIv, obMonth, obYear };
+}
+
 async function renderBoard(positions, boardHistory, interviews) {
   boardHistoryCache = boardHistory || [];
   window._boardPositions = positions;
@@ -1269,20 +1287,23 @@ async function renderBoard(positions, boardHistory, interviews) {
   
   const bMonth = progressMonthStr();
   const bYear = bMonth.slice(0,4);
-  // 各岗位当月/当年指标（简历、初面、入职从面试记录实时统计；复试/Offer 沿用看板已存阶段）
+  // 各岗位指标：简历/初面来自面试记录（当前进度月）；本月入职来自招聘进度；本年入职=本月+历史看板
+  const bm = boardOnboardMaps(bMonth, bYear);
   const boardStats = {};
-  positions.forEach(p => { boardStats[p.position] = boardStatsFor(p.position, interviews, bMonth, bYear); });
+  positions.forEach(p => { boardStats[p.position] = boardStat(p.position, interviews, bMonth, bYear, bm); });
   const sumResume = positions.reduce((a,p)=>a+boardStats[p.position].resume,0);
   const sumFirst = positions.reduce((a,p)=>a+boardStats[p.position].firstIv,0);
   const sumSecond = positions.reduce((a,p)=>a+(p.stages&&p.stages.secondInterview||0),0);
   const sumOffer = positions.reduce((a,p)=>a+(p.stages&&p.stages.offer||0),0);
   const sumObMonth = positions.reduce((a,p)=>a+boardStats[p.position].obMonth,0);
+  const sumObYear = positions.reduce((a,p)=>a+boardStats[p.position].obYear,0);
   const funnel = [
     { label:'简历筛选', icon:'简', count:sumResume },
     { label:'初面', icon:'初', count:sumFirst },
     { label:'复试', icon:'复', count:sumSecond },
     { label:'Offer', icon:'发', count:sumOffer },
-    { label:'本月入职', icon:'入', count:sumObMonth }
+    { label:'本月入职', icon:'入', count:sumObMonth },
+    { label:'本年入职', icon:'年', count:sumObYear }
   ];
   const total = funnel.reduce((a,f)=>a+f.count,0);
 
@@ -3497,6 +3518,7 @@ async function render() {
       try { users = await apiGet('/api/users'); } catch(e) {}
     }
     try { progress = await apiGet('/api/progress?month=' + progressMonthStr()); } catch(e) {}
+    currentProgress = progress; boardHistoryGlobal = boardHistory || [];
     let contracts = [];
     try { contracts = await apiGet('/api/contracts'); } catch(e) {}
     
@@ -4396,9 +4418,11 @@ function filterPositions() {
     const txt = tr.textContent.toLowerCase();
     let ok = !kw || txt.includes(kw);
     if (flow === 'gap' || flow === 'full') {
-      const st = boardStatsFor(p.position, window._interviewData || [], progressMonthStr(), progressMonthStr().slice(0,4));
-      if (flow === 'gap') ok = ok && st.obYear < (p.headcount || 1);
-      if (flow === 'full') ok = ok && st.obYear >= (p.headcount || 1);
+      const _m = progressMonthStr(), _y = _m.slice(0,4);
+      const _bm = boardOnboardMaps(_m, _y);
+      const st = boardStat(p.position, window._interviewData || [], _m, _y, _bm);
+      if (flow === 'gap') ok = ok && st.obMonth < (p.headcount || 1);
+      if (flow === 'full') ok = ok && st.obMonth >= (p.headcount || 1);
     }
     tr.style.display = ok ? '' : 'none';
   });
