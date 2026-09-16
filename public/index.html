@@ -328,9 +328,13 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 /* Table */
 .pos-table,.interview-table{width:100%;border-collapse:collapse}
 .pos-table tr:hover,.interview-table tr:hover{background:#F5F7FA}
-/* 合同台账「签订单位」列：多单位简称垂直堆叠、5 字硬换行 */
-.sign-unit-block{line-height:1.4;color:var(--text)}
+/* 合同台账「签订单位」列：多单位简称垂直堆叠、CJK 之间不强制拆行（用户口述会控制 ≤5 字，不再做硬截行） */
+.sign-unit-block{line-height:1.4;color:var(--text);word-break:keep-all;overflow-wrap:break-word}
 .sign-unit-block-sep{margin-top:4px;padding-top:4px;border-top:1px dashed #DCE6F5}
+/* 分页器当前页高亮：填充主色 + 加深边框，让"在第几页"一眼可见 */
+.pagination{gap:6px}
+.pagination-btn.active{background:var(--primary);color:#fff;border-color:var(--primary);font-weight:600;box-shadow:0 1px 2px rgba(22,93,255,.25)}
+.pagination-btn.active:hover{background:#0E42D2;border-color:#0E42D2;color:#fff}
 /* Sticky columns for interview table */
 .sticky-col{position:sticky;left:40px;z-index:2;width:92px;min-width:92px;white-space:nowrap}
 .sticky-col2{position:sticky;left:132px;z-index:2;min-width:60px}
@@ -1026,21 +1030,16 @@ function bIsOnboarded(iv){
 function daysUntil(d) { if(!d) return Infinity; return Math.ceil((new Date(d) - new Date(today())) / 86400000); }
 function escapeHtml(str) { if(str===null||str===undefined) return ''; str=String(str); return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
-// 签订单位展示：按「/」拆成若干单位简称，每个简称垂直堆叠为一个块；块内每 5 字硬换行。
-// 例「雷德利/满辰财务」→「雷德利」/「满辰财务」两块；「安徽中亿财务咨询」→ 5 字/行换行。
+// 签订单位展示：按「/」拆成若干单位简称垂直堆叠，块之间用虚线分隔。
+// 段内不再做硬截行——用户口述会控制每段不超过 5 个汉字，CJK 字符配合
+// CSS `word-break:keep-all` 自然不拆字；只有极端长串（非 CJK）才由
+// `overflow-wrap:break-word` 兜底折行，避免短单位被浏览器强行拆成两行。
 function formatSignUnit(text) {
   if (!text || !String(text).trim()) return '-';
   const units = String(text).split('/').map(s => s.trim()).filter(Boolean);
   if (!units.length) return '-';
-  const MAX = 5;
-  const wrapped = (u) => {
-    if (u.length <= MAX) return escapeHtml(u);
-    const lines = [];
-    for (let i = 0; i < u.length; i += MAX) lines.push(u.slice(i, i + MAX));
-    return lines.map(escapeHtml).join('<br/>');
-  };
   return units.map((u, i) =>
-    `<div class="sign-unit-block${i > 0 ? ' sign-unit-block-sep' : ''}">${wrapped(u)}</div>`
+    `<div class="sign-unit-block${i > 0 ? ' sign-unit-block-sep' : ''}">${escapeHtml(u)}</div>`
   ).join('');
 }
 
@@ -3449,7 +3448,7 @@ function filterContracts() {
       <td style="white-space:nowrap">${escapeHtml(String(c.duration||'-'))}</td>
       <td style="white-space:nowrap">${c.endDate||'-'}</td>
       <td style="white-space:nowrap">${countdown}</td>
-      <td style="max-width:90px;font-size:12px;line-height:1.45;white-space:normal;word-break:break-all">${formatSignUnit(c.signUnit)}</td>
+      <td style="max-width:90px;font-size:12px;line-height:1.45;white-space:normal">${formatSignUnit(c.signUnit)}</td>
       <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${escapeHtml(c.notes||'')}">${escapeHtml(c.notes||'-')}</td>
       <td style="white-space:nowrap"><button class="btn btn-outline btn-xs" onclick="editContract('${c.id}')">编辑</button><button class="btn btn-danger btn-xs" onclick="deleteContract('${c.id}')">删除</button></td>
     </tr>`;
