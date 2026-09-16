@@ -1733,17 +1733,24 @@ function boardSnapshotOf(list) {
     stages: { resumeScreen: (p.stages && p.stages.resumeScreen) || 0, firstInterview: (p.stages && p.stages.firstInterview) || 0, secondInterview: (p.stages && p.stages.secondInterview) || 0, finalInterview: (p.stages && p.stages.finalInterview) || 0, offer: (p.stages && p.stages.offer) || 0, onboard: (p.stages && p.stages.onboard) || 0 }
   }));
 }
-// 某月的真实指标：面试数(按 interview 创建月份) + 入职/流失(优先取该月 boardHistory 快照 summary，缺失则实时计算)
+// 某月的真实指标：面试数(按 firstInterviewDate 所在月) + 入职/流失(按对应日期所在月)
+// 全部从「面试管理」interviews 表统计，与招聘看板岗位列表英雄带口径一致。
 function monthMetrics(yyyymm) {
-  const interviewsCount = (db.interviews || []).filter(iv => ((iv.createdAt || '').slice(0, 7) === yyyymm)).length;
+  // 本月面试数 = 当月有初面日期(firstInterviewDate)的面试条数（数据源：面试管理）
+  const interviewsCount = (db.interviews || []).filter(iv =>
+    iv.firstInterviewDate && monthOfDate(iv.firstInterviewDate) === yyyymm
+  ).length;
   let onboard = 0, attrition = 0;
+  // 优先取当月 boardHistory 快照 summary（避免事后改面试表导致历史月度数字被覆盖）
   const snap = (db.boardHistory || []).find(h => h.month === yyyymm);
   if (snap && snap.summary) {
     onboard = snap.summary.onboard || 0;
     attrition = snap.summary.attrition || 0;
   } else {
     (db.interviews || []).forEach(iv => {
+      // 本月入职数 = 当月有入职时间（secondInterviewDate）且仍在岗的面试条数
       if (isOnboarded(iv) && monthOfDate(iv.secondInterviewDate) === yyyymm) onboard++;
+      // 本月流失数 = 当月有离职时间（departureDate）或备注离职关键词的面试条数
       if (isDeparted(iv) && monthOfDate(iv.departureDate) === yyyymm) attrition++;
     });
   }
@@ -1799,10 +1806,18 @@ app.delete('/api/board-history/:month', authMiddleware, adminOnly, (req, res) =>
 });
 
 // ========== KPI 真实环比（本月 vs 上月）==========
-// 面试数按 interview 创建月份统计；入职/流失取当月与上月 boardHistory 快照对比（缺失则实时回退）。
+// 月份参数：默认取服务器当前月份；前端可传 ?month=YYYY-MM 指定为「招聘进度」当前月，
+// 与招聘看板岗位列表英雄带口径完全对齐，全部从「面试管理」interviews 表统计。
+function prevMonthOf(yyyymm) {
+  const m = /^(\d{4})-(\d{2})$/.exec((yyyymm || '').trim());
+  if (!m) return prevMonthStr(new Date());
+  let y = parseInt(m[1], 10), mo = parseInt(m[2], 10) - 1;
+  if (mo < 1) { mo = 12; y -= 1; }
+  return monthStr(y, mo);
+}
 app.get('/api/kpi-trend', authMiddleware, (req, res) => {
-  const cur = curMonthStr();
-  const prev = prevMonthStr(new Date());
+  const cur = (req.query.month && /^\d{4}-\d{2}$/.test(req.query.month)) ? req.query.month : curMonthStr();
+  const prev = prevMonthOf(cur);
   const curM = monthMetrics(cur);
   const prevM = monthMetrics(prev);
   const hasPrev = (db.boardHistory || []).some(h => h.month === prev)
