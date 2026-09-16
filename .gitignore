@@ -1,5 +1,8 @@
 node_modules/
 data/
+backups/
+.gh_pat
+.env
 *.log
 *.tar.gz
 .DS_Store

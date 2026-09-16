@@ -1561,6 +1561,13 @@ async function renderInterviews(interviews, positions) {
         <button class="btn btn-outline btn-sm" onclick="dedupeInterviews()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>人员去重
         </button>
+        ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="backupAllData()" title="导出全库备份（每次部署更新前必做）">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>备份数据
+        </button>
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('backupImportFile').click()" title="从备份文件恢复全库数据">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>恢复数据
+        </button>
+        <input type="file" id="backupImportFile" accept=".json" style="display:none" onchange="restoreAllData(this)">`:''}
         <button class="btn btn-primary btn-sm" onclick="showAddInterview()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>新增面试
         </button>
@@ -1810,6 +1817,74 @@ async function dedupeInterviews() {
     }
     await render();
   } catch(e) { showToast(e.message || '去重失败'); }
+}
+
+// ===== 全库备份 / 恢复（部署前务必先备份，防止重新部署后数据丢失） =====
+async function backupAllData() {
+  if (!isAdmin()) { showToast('仅管理员可备份数据'); return; }
+  try {
+    showToast('正在生成备份…');
+    const res = await fetch('/api/backup/export', { headers: { Authorization: 'Bearer ' + auth.token } });
+    const txt = await res.text();
+    if (!res.ok) throw new Error(txt.slice(0, 200));
+    const j = JSON.parse(txt);
+    const c = j._meta && j._meta.counts ? j._meta.counts : {};
+    const name = 'hr_backup_' + today() + '_' + new Date().toTimeString().slice(0, 5).replace(':', '') + '.json';
+    downloadBlob(txt, name, 'application/json;charset=utf-8');
+    showToast(`备份完成：面试 ${c.interviews || 0} · 随访 ${c.hires || 0} · 合同 ${c.contracts || 0} · 岗位 ${c.positions || 0}（存储：${j._meta.store === 'postgres' ? 'Postgres' : '本地文件'}）`);
+  } catch (e) { showToast('备份失败：' + (e.message || '')); }
+}
+
+async function restoreAllData(input) {
+  if (!isAdmin()) { showToast('仅管理员可恢复数据'); if (input) input.value = ''; return; }
+  const f = input && input.files && input.files[0];
+  if (!f) return;
+  try {
+    const txt = await f.text();
+    const parsed = JSON.parse(txt);
+    const src = parsed.db || parsed;
+    const c = (parsed._meta && parsed._meta.counts) || {};
+    const summary = `备份文件：${f.name}\n导出时间：${(parsed._meta && parsed._meta.exportedAt) || '未知'}\n面试 ${c.interviews || '?'} · 随访 ${c.hires || '?'} · 合同 ${c.contracts || '?'}\n\n选择「确定」= 覆盖恢复（清空现有同名字段后导入，恢复前会自动快照当前库）；选择「取消」= 放弃。`;
+    if (!confirm(summary)) { input.value = ''; return; }
+    showToast('正在恢复…');
+    const r = await apiPost('/api/backup/import', { db: src, mode: 'overwrite' });
+    const msg = `恢复完成：面试 ${r.counts.interviews} · 随访 ${r.counts.hires} · 合同 ${r.counts.contracts}`;
+    const ok = await reloginAfterRestore();
+    showToast(ok ? msg + '（已自动重新登录）' : msg + '（请重新登录）');
+    if (ok) await render();
+  } catch (e) { showToast('恢复失败：' + (e.message || '')); }
+  input.value = '';
+}
+
+// 覆盖恢复会把 users 一并替换（用户 id 可能变化），导致当前 token 失效 → 自动重新登录
+async function reloginAfterRestore() {
+  let pass = '';
+  try {
+    const r = JSON.parse(localStorage.getItem('hrwb_remember') || 'null');
+    if (r && r.username === auth.username) pass = r.password || '';
+  } catch (e) {}
+  if (!auth.username || !pass) { showLogin(); return false; }
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: auth.username, password: pass })
+    });
+    const data = await res.json();
+    if (!res.ok) { showLogin(); return false; }
+    auth = data;
+    document.getElementById('loginOverlay').style.display = 'none';
+    document.getElementById('mainApp').style.display = '';
+    updateHeader();
+    return true;
+  } catch (e) { showLogin(); return false; }
+}
+
+async function makeDataSnapshot() {
+  if (!isAdmin()) { showToast('仅管理员可操作'); return; }
+  try {
+    const r = await apiPost('/api/backup/snapshot', { label: 'manual' });
+    showToast(r.ok ? `已生成快照（面试 ${r.counts.interviews} · 随访 ${r.counts.hires}）` : '快照失败');
+  } catch (e) { showToast('快照失败：' + (e.message || '')); }
 }
 
 async function exportInterviews() {

@@ -124,6 +124,86 @@ function hashPass(password, salt) {
   return crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
 }
 
+// ========== 数据备份 / 快照（防部署丢数据） ==========
+// 构建号：Render 会注入 RENDER_GIT_COMMIT，用于部署脚本判断新版本是否已上线
+const BUILD_ID = (process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || '').slice(0, 7) || 'dev';
+const SNAPSHOT_KEEP = 8;           // 最多保留 8 份自动快照（Postgres 行 / 本地文件）
+const SNAP_PREFIX = 'backup:';     // Postgres kv 表中的快照 key 前缀
+const SNAP_DIR = path.join(DATA_DIR, 'backups'); // 文件存储模式下的快照目录
+
+function dbCounts(src) {
+  const d = src || db;
+  const out = {};
+  ['interviews', 'hires', 'positions', 'progress', 'contracts', 'users', 'todos', 'templates',
+   'boardHistory', 'candidates', 'jobSpecs', 'questionBanks', 'hiringDecisions', 'probations'].forEach(k => {
+    out[k] = Array.isArray(d[k]) ? d[k].length : 0;
+  });
+  return out;
+}
+
+// 把当前库快照写入持久层（Postgres 优先，否则本地文件），保留最近 SNAPSHOT_KEEP 份
+async function snapshotDb(label) {
+  const at = new Date().toISOString();
+  const tag = label || 'auto';
+  const payload = JSON.stringify({ _snapshotAt: at, _label: tag, db });
+  try {
+    if (usePg && pgClient) {
+      const key = SNAP_PREFIX + at + '|' + tag;
+      await pgClient.query(
+        "INSERT INTO kv(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",
+        [key, payload]
+      );
+      const r = await pgClient.query("SELECT key FROM kv WHERE key LIKE $1 ORDER BY key DESC", [SNAP_PREFIX + '%']);
+      const extra = r.rows.slice(SNAPSHOT_KEEP).map(x => x.key);
+      if (extra.length) await pgClient.query("DELETE FROM kv WHERE key = ANY($1::text[])", [extra]);
+      console.log(`[backup] snapshot -> Postgres ${key}（保留 ${Math.min(r.rows.length, SNAPSHOT_KEEP)} 份）`);
+      return key;
+    }
+    if (!fs.existsSync(SNAP_DIR)) fs.mkdirSync(SNAP_DIR, { recursive: true });
+    const f = path.join(SNAP_DIR, 'db-' + at.replace(/[:.]/g, '-') + '-' + tag + '.json');
+    fs.writeFileSync(f, payload, 'utf8');
+    const files = fs.readdirSync(SNAP_DIR).filter(x => x.startsWith('db-') && x.endsWith('.json')).sort();
+    files.slice(0, Math.max(0, files.length - SNAPSHOT_KEEP)).forEach(x => { try { fs.unlinkSync(path.join(SNAP_DIR, x)); } catch (e) {} });
+    console.log(`[backup] snapshot -> file ${f}`);
+    return f;
+  } catch (e) {
+    console.error('[backup] snapshot failed:', e.message);
+    return null;
+  }
+}
+
+async function listSnapshots() {
+  try {
+    if (usePg && pgClient) {
+      const r = await pgClient.query("SELECT key, value FROM kv WHERE key LIKE $1 ORDER BY key DESC LIMIT 30", [SNAP_PREFIX + '%']);
+      return r.rows.map(x => {
+        let counts = null, at = '', label = '';
+        try { const j = JSON.parse(x.value); at = j._snapshotAt || ''; label = j._label || ''; counts = dbCounts(j.db); } catch (e) {}
+        return { key: x.key, at, label, counts };
+      });
+    }
+    if (!fs.existsSync(SNAP_DIR)) return [];
+    return fs.readdirSync(SNAP_DIR).filter(x => x.startsWith('db-') && x.endsWith('.json')).sort().reverse().slice(0, 30).map(f => {
+      let counts = null, at = '', label = '';
+      try { const j = JSON.parse(fs.readFileSync(path.join(SNAP_DIR, f), 'utf8')); at = j._snapshotAt || ''; label = j._label || ''; counts = dbCounts(j.db); } catch (e) {}
+      return { key: f, at, label, counts };
+    });
+  } catch (e) { console.error('[backup] list snapshots failed:', e.message); return []; }
+}
+
+async function loadSnapshot(key) {
+  if (usePg && pgClient) {
+    const r = await pgClient.query("SELECT value FROM kv WHERE key=$1", [key]);
+    if (!r.rows.length) return null;
+    const j = JSON.parse(r.rows[0].value);
+    return j.db || null;
+  }
+  const f = path.join(SNAP_DIR, path.basename(String(key)));
+  if (!fs.existsSync(f)) return null;
+  const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+  return j.db || null;
+}
+
 function genSalt() {
   return crypto.randomBytes(16).toString('hex');
 }
@@ -1517,6 +1597,109 @@ app.post('/api/hires/import', authMiddleware, adminOnly, (req, res) => {
   res.json({ ok: true, mode: importMode, added, updated, skipped, total: db.hires.length });
 });
 
+// ========== 数据备份 / 恢复 API（部署前必做） ==========
+// 健康检查（无需登录）：用于部署脚本判断新版本是否已上线 + 当前存储类型
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    version: BUILD_ID,
+    store: usePg ? 'postgres' : 'file',
+    pgError: lastPgError || '',
+    uptime: Math.round(process.uptime()),
+    at: new Date().toISOString()
+  });
+});
+
+// 当前库概况：存储类型 + 各集合条数（部署前后对比用）
+app.get('/api/backup/info', authMiddleware, (req, res) => {
+  res.json({
+    version: BUILD_ID,
+    store: usePg ? 'postgres' : 'file',
+    pgError: lastPgError || '',
+    counts: dbCounts(),
+    lastSnapshotAt: db._lastSnapshotAt || '',
+    updatedAt: db._updatedAt || ''
+  });
+});
+
+// 导出全库备份（adminOnly）。?snapshot=<key> 可导出指定历史快照
+app.get('/api/backup/export', authMiddleware, adminOnly, async (req, res) => {
+  let payload = db, source = 'current';
+  const snap = (req.query.snapshot || '').toString().trim();
+  if (snap) {
+    const s = await loadSnapshot(snap);
+    if (!s) return res.status(404).json({ error: '快照不存在：' + snap });
+    payload = s; source = snap;
+  }
+  const body = {
+    _meta: {
+      exportedAt: new Date().toISOString(),
+      version: BUILD_ID,
+      store: usePg ? 'postgres' : 'file',
+      source,
+      counts: dbCounts(payload)
+    },
+    db: payload
+  };
+  const filename = 'hr_backup_' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.json';
+  res.setHeader('Content-Disposition', 'attachment; filename="' + filename + '"');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.send(JSON.stringify(body, null, 2));
+});
+
+// 全库恢复（adminOnly）。body: { db:{...}, mode:'merge'|'overwrite' } 或 { snapshot:'<key>', mode }
+// 恢复前会先自动快照当前库，万一导错还能回滚。
+app.post('/api/backup/import', authMiddleware, adminOnly, async (req, res) => {
+  const body = req.body || {};
+  let src = body.db;
+  const snap = (body.snapshot || '').toString().trim();
+  if (!src && snap) src = await loadSnapshot(snap);
+  if (!src || typeof src !== 'object') return res.status(400).json({ error: '缺少 db 数据或 snapshot 名称' });
+  const mode = (body.mode || 'merge').toString().trim() === 'overwrite' ? 'overwrite' : 'merge';
+  await snapshotDb('auto-before-import');
+  const ARR_KEYS = ['users', 'positions', 'interviews', 'todos', 'templates', 'hires', 'progress',
+    'contracts', 'jobSpecs', 'candidates', 'questionBanks', 'hiringDecisions', 'probations', 'boardHistory'];
+  const report = {};
+  if (mode === 'overwrite') {
+    ARR_KEYS.forEach(k => {
+      if (!Array.isArray(src[k])) return;
+      report[k] = { mode: 'overwrite', before: (db[k] || []).length, after: src[k].length };
+      db[k] = src[k];
+    });
+  } else {
+    ARR_KEYS.forEach(k => {
+      if (!Array.isArray(src[k])) return;
+      if (!Array.isArray(db[k])) db[k] = [];
+      const idx = new Map(db[k].map(x => [x.id, x]));
+      let added = 0, updated = 0;
+      src[k].forEach(item => {
+        if (!item || !item.id) { db[k].push({ ...item, id: genId() }); added++; return; }
+        if (idx.has(item.id)) {
+          const i = db[k].findIndex(x => x.id === item.id);
+          db[k][i] = { ...db[k][i], ...item };
+          updated++;
+        } else { db[k].push(item); added++; }
+      });
+      report[k] = { mode: 'merge', before: idx.size, added, updated, after: db[k].length };
+    });
+  }
+  db._updatedAt = new Date().toISOString();
+  await saveDb();
+  res.json({ ok: true, mode, report, counts: dbCounts() });
+});
+
+// 列出自动快照
+app.get('/api/backup/snapshots', authMiddleware, adminOnly, async (req, res) => {
+  res.json({ store: usePg ? 'postgres' : 'file', keep: SNAPSHOT_KEEP, items: await listSnapshots() });
+});
+
+// 手动打快照
+app.post('/api/backup/snapshot', authMiddleware, adminOnly, async (req, res) => {
+  const label = ((req.body && req.body.label) || 'manual').toString().slice(0, 30);
+  const key = await snapshotDb(label);
+  res.json({ ok: !!key, key, counts: dbCounts() });
+});
+
 // ========== Progress Table (Recruitment Progress) ==========
 app.get('/api/progress', authMiddleware, (req, res) => {
   // 招聘进度表按月隔离：month=YYYY-MM 只返回该月行；不传返回全部（兼容旧调用）
@@ -2305,6 +2488,17 @@ app.get('*', (req, res) => {
   if (!db.contracts) db.contracts = [];
   // Ensure newly-added collections exist even when loading an older db.json
   ['jobSpecs', 'candidates', 'questionBanks', 'hiringDecisions', 'probations', 'boardHistory'].forEach(k => { if (!db[k]) db[k] = []; });
+  // 启动即自动快照当前库（在任何迁移/清洗/播种之前），保留最近 8 份。
+  // Postgres 模式下快照存进 kv 表（随数据库一起持久化，重新部署不丢）；文件模式存 data/backups/。
+  try {
+    const _pre = dbCounts();
+    if ((_pre.users || 0) > 0 || (_pre.interviews || 0) > 0) {
+      const _k = await snapshotDb('boot');
+      if (_k) { db._lastSnapshotAt = new Date().toISOString(); console.log('[backup] boot snapshot:', _k, JSON.stringify(_pre)); }
+    } else {
+      console.log('[backup] boot snapshot skipped（库内暂无业务数据）');
+    }
+  } catch (e) { console.error('[backup] boot snapshot error:', e.message); }
   // Seed a demo job spec once (so the module is usable immediately on existing DBs)
   if (db.jobSpecs.length === 0) {
     const now = new Date().toISOString().split('T')[0];
