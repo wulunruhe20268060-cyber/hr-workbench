@@ -13,3 +13,5 @@ standalone.html
 patch_*.py
 deploy.sh
 .build/
+_chk.js
+test_*.js
