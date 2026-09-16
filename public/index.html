@@ -1641,9 +1641,9 @@ function filterInterviews() {
         else if (iv.result==='待定') tag='<span class="tag tag-pending">待定</span>';
         else if (iv.result==='淘汰') tag='<span class="tag tag-fail">淘汰</span>';
         else tag='<span class="tag tag-wait">待面试</span>';
-        const d1 = iv.firstInterviewDate||'-';
-        const d2 = iv.secondInterviewDate||'-';
-        const d3 = iv.departureDate || extractDepartureFromNotes(iv.notes) || '-';
+        const d1 = normalizeDateField(iv.firstInterviewDate) || '-';
+        const d2 = normalizeDateField(iv.secondInterviewDate) || '-';
+        const d3 = normalizeDateField(iv.departureDate) || extractDepartureFromNotes(iv.notes) || '-';
         const seqNum = (interviewPage - 1) * interviewPageSize + idx + 1;
         return `<tr>
           <td style="white-space:nowrap"><input type="checkbox" class="row-checkbox" data-id="${iv.id}" onchange="updateBatchDeleteBar()"></td>
@@ -1791,10 +1791,10 @@ async function batchImport() {
       name: parts[0], position: parts[1]||'', phone: parts[2]||'',
       education: parts[3]||'', gender: parts[4]||'', inviter: parts[5]||'',
       source: parts[6]||'',
-      firstInterviewDate: (parts[7]&&parts[7]!=='-') ? parts[7] : defaultDate,
-      secondInterviewDate: (parts[8]&&parts[8]!=='-') ? parts[8] : '',
+      firstInterviewDate: normalizeDateField((parts[7]&&parts[7]!=='-') ? parts[7] : defaultDate),
+      secondInterviewDate: normalizeDateField((parts[8]&&parts[8]!=='-') ? parts[8] : ''),
       interviewer: parts[9]||'', result: (parts[10]&&parts[10]!=='-') ? parts[10] : '待面试',
-      departureDate: (parts[11]&&parts[11]!=='-') ? parts[11] : '',
+      departureDate: normalizeDateField((parts[11]&&parts[11]!=='-') ? parts[11] : ''),
       notes: parts[12]||''
     });
   });
@@ -1895,6 +1895,17 @@ function matchDateInText(text) {
   if ((m = text.match(/(\d{1,2})[-/.](\d{1,2})(?![-\d])/))) return normalizeDateParts('', m[1], m[2]);
   return '';
 }
+// 日期字段规范化：上传表格里的「入职时间」列可能写成「2026-09-10入职」「入职2026.9.10」等，
+// 这里只保留年月日（YYYY-MM-DD），把「入职」等文字去掉；纯文字无日期则视为空。
+function normalizeDateField(val) {
+  const s = (val == null ? '' : String(val)).trim();
+  if (!s || s === '-') return '';
+  const d = matchDateInText(s);
+  if (d) return d;
+  // 解析不出日期：若整串不含任何数字（如「入职」「待定」），视为无效日期返回空
+  return /\d/.test(s) ? s : '';
+}
+
 // 从「备注」中提取离职日期。支持：
 //   "离职时间2026/09/10" / "8.10离职" / "2026-09-10 离职" / "9月10日离职" 等
 function extractDepartureFromNotes(notes) {
@@ -1936,11 +1947,11 @@ async function handleInterviewCSVUpload(event) {
       position: r['岗位'] || r['position'] || '',
       phone: r['电话'] || r['phone'] || '',
       source: r['渠道来源'] || r['渠道'] || r['source'] || '',
-      firstInterviewDate: r['面试时间'] || r['初面时间'] || r['firstInterviewDate'] || '',
-      secondInterviewDate: r['入职时间'] || r['复面时间'] || r['secondInterviewDate'] || '',
+      firstInterviewDate: normalizeDateField(r['面试时间'] || r['初面时间'] || r['firstInterviewDate'] || ''),
+      secondInterviewDate: normalizeDateField(r['入职时间'] || r['复面时间'] || r['secondInterviewDate'] || ''),
       interviewer: r['面试官'] || r['interviewer'] || '',
       result: r['面试结果'] || r['结果'] || r['result'] || '待面试',
-      departureDate: departureFromNotes || departureExplicit,
+      departureDate: departureFromNotes || normalizeDateField(departureExplicit),
       notes: rawNotes,
       education: r['学历'] || r['education'] || '',
       gender: r['性别'] || r['gender'] || '',

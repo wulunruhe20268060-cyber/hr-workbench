@@ -674,8 +674,12 @@ app.get('/api/interviews', authMiddleware, (req, res) => {
 });
 
 app.post('/api/interviews', authMiddleware, (req, res) => {
+  const body = { ...req.body };
+  ['firstInterviewDate', 'secondInterviewDate', 'departureDate'].forEach(k => {
+    if (body[k]) body[k] = normalizeIvDateField(body[k]);
+  });
   const iv = {
-    id: genId(), ...req.body,
+    id: genId(), ...body,
     createdBy: req.userId,
     createdAt: new Date().toISOString().split('T')[0]
   };
@@ -690,10 +694,12 @@ app.post('/api/interviews/batch', authMiddleware, (req, res) => {
     return res.status(400).json({ error: '请提供有效的面试数据' });
   }
   const now = new Date().toISOString().split('T')[0];
-  const added = items.map(item => ({
-    id: genId(), ...item,
-    createdBy: req.userId, createdAt: now
-  }));
+  const added = items.map(item => {
+    ['firstInterviewDate', 'secondInterviewDate', 'departureDate'].forEach(k => {
+      if (item[k]) item[k] = normalizeIvDateField(item[k]);
+    });
+    return { id: genId(), ...item, createdBy: req.userId, createdAt: now };
+  });
   db.interviews.unshift(...added);
   syncRecruitFromInterviews();
   res.json({ count: added.length });
@@ -709,6 +715,10 @@ app.post('/api/interviews/batch-upsert', authMiddleware, (req, res) => {
   const now = new Date().toISOString().split('T')[0];
   let updated = 0, added = 0;
   items.forEach(item => {
+    // 服务端兜底清洗：日期字段只保留年月日（去掉「入职」「复面」等文字）
+    ['firstInterviewDate', 'secondInterviewDate', 'departureDate'].forEach(k => {
+      if (item[k]) item[k] = normalizeIvDateField(item[k]);
+    });
     // 按「姓名 + 手机号」双重匹配识别同一人（优先）；手机号为空时回退「姓名 + 岗位」定位，避免重复建档。
     let existing = null;
     if (item.name && item.phone) {
@@ -737,7 +747,12 @@ app.put('/api/interviews/:id', authMiddleware, (req, res) => {
   if (req.user.role !== 'admin' && db.interviews[idx].createdBy !== req.userId && !isInterviewInviter(db.interviews[idx], req.user)) {
     return res.status(403).json({ error: '无权修改他人记录' });
   }
-  db.interviews[idx] = { ...db.interviews[idx], ...req.body };
+  const patch = { ...req.body };
+  // 服务端兜底清洗：日期字段只保留年月日（去掉「入职」「复面」等文字）
+  ['firstInterviewDate', 'secondInterviewDate', 'departureDate'].forEach(k => {
+    if (patch[k]) patch[k] = normalizeIvDateField(patch[k]);
+  });
+  db.interviews[idx] = { ...db.interviews[idx], ...patch };
   // 以面试记录为源头重算招聘进度 / 看板 / 新人随访
   syncRecruitFromInterviews();
   res.json(db.interviews[idx]);
@@ -1883,6 +1898,31 @@ app.post('/api/import', authMiddleware, adminOnly, (req, res) => {
 // NOTE: this is intentionally placed after all /api routes. It is defined again below
 // right before app.listen. Do not re-add a wildcard here.
 
+// ---- 日期字段清洗：上传表格里的「入职时间」列可能写成「2026-09-10入职」，
+//      统一只保留年月日（YYYY-MM-DD），把「入职」等文字去掉。 ----
+function _ivNormalizeDateParts(y, mo, d) {
+  y = +y; mo = +mo; d = +d;
+  if (!mo || mo < 1 || mo > 12 || d < 1 || d > 31) return '';
+  if (!y) y = new Date().getFullYear();
+  return y + '-' + String(mo).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+}
+function _ivMatchDateInText(text) {
+  if (!text) return '';
+  let m;
+  if ((m = text.match(/(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?/))) return _ivNormalizeDateParts(m[1], m[2], m[3]);
+  if ((m = text.match(/(\d{1,2})月(\d{1,2})日/))) return _ivNormalizeDateParts('', m[1], m[2]);
+  if ((m = text.match(/(\d{1,2})[-/.](\d{1,2})(?![-\d])/))) return _ivNormalizeDateParts('', m[1], m[2]);
+  return '';
+}
+// 规范日期字段：能解析出日期→归一为 YYYY-MM-DD；整串无数字（如「入职」「待定」）→空；其余保留原值
+function normalizeIvDateField(val) {
+  const s = (val == null ? '' : String(val)).trim();
+  if (!s || s === '-') return '';
+  const d = _ivMatchDateInText(s);
+  if (d) return d;
+  return /\d/.test(s) ? s : '';
+}
+
 // Migrate old interview fields to new schema
 function migrateInterviews() {
   let migrated = false;
@@ -1910,6 +1950,12 @@ function migrateInterviews() {
     if (iv.interviewDate) { iv.firstInterviewDate = iv.firstInterviewDate || iv.interviewDate; }
     delete iv.interviewDate;
     delete iv.email;
+    // 日期字段清洗（每次启动幂等）：历史数据里「入职时间」若带「入职」等文字，统一只留年月日
+    ['firstInterviewDate', 'secondInterviewDate', 'departureDate'].forEach(k => {
+      const before = (iv[k] == null ? '' : String(iv[k])).trim();
+      const after = normalizeIvDateField(before);
+      if (after !== before) { iv[k] = after; migrated = true; }
+    });
   });
   if (migrated) { saveDb(); console.log('Migrated interviews to new schema'); }
 }
