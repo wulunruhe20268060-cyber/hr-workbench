@@ -339,7 +339,7 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 .interview-table tr:hover td.sticky-col2{background:#F5F7FA}
 /* 序号列悬浮编辑按钮 */
 .seq-cell{position:relative;text-align:center;cursor:default}
-.seq-num{display:inline-block;min-width:20px}
+.seq-num{display:inline-block;min-width:20px;position:relative;z-index:11}
 .seq-edit-btn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scale(0);transition:transform .15s;background:var(--primary);color:#fff;border:none;border-radius:4px;padding:2px 6px;font-size:11px;cursor:pointer;white-space:nowrap;box-shadow:0 2px 6px rgba(22,93,255,.3);z-index:10}
 .interview-table tr:hover .seq-edit-btn{transform:translate(-50%,-50%) scale(1)}
 .seq-edit-btn:hover{background:#0E42D2}
