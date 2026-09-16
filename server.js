@@ -763,6 +763,49 @@ app.post('/api/interviews/batch-delete', authMiddleware, (req, res) => {
   res.json({ ok: true, removed: before - db.interviews.length });
 });
 
+// 人员去重：按「姓名+手机号」（无手机号时按「姓名+岗位」）识别同一人，
+// 每组保留字段最完整的一条，并把重复记录中的非空字段合并进来，其余删除。
+app.post('/api/interviews/dedupe', authMiddleware, adminOnly, (req, res) => {
+  const groups = {};
+  const phoneOf = iv => (iv.phone || '').toString().replace(/[\s-]/g, '');
+  db.interviews.forEach(iv => {
+    const name = (iv.name || '').toString().trim();
+    if (!name) return; // 无姓名不参与去重
+    const phone = phoneOf(iv);
+    let key;
+    if (phone) key = 'p|' + name + '|' + phone;
+    else if ((iv.position || '').toString().trim()) key = 'n|' + name + '|' + (iv.position || '').toString().trim();
+    else return; // 既无手机号也无岗位，仅同名不合并（避免误删）
+    (groups[key] = groups[key] || []).push(iv);
+  });
+  const filledCount = iv => Object.keys(iv).filter(k => !['id', 'createdBy', 'createdAt', 'updatedAt'].includes(k) && iv[k] !== '' && iv[k] !== null && iv[k] !== undefined).length;
+  let removed = 0, merged = 0;
+  Object.values(groups).forEach(list => {
+    if (list.length < 2) return;
+    // 保留字段最完整的一条；并列时取创建时间最新的
+    list.sort((a, b) => (filledCount(b) - filledCount(a)) || ((b.createdAt || '').localeCompare(a.createdAt || '')));
+    const keeper = list[0];
+    const dups = list.slice(1).sort((a, b) => (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || ''));
+    dups.forEach(d => {
+      Object.keys(d).forEach(k => {
+        if (['id', 'createdBy', 'createdAt'].includes(k)) return;
+        const cur = keeper[k];
+        if (cur === '' || cur === null || cur === undefined) {
+          if (d[k] !== '' && d[k] !== null && d[k] !== undefined) { keeper[k] = d[k]; merged++; }
+        }
+      });
+    });
+    const dupIds = new Set(dups.map(d => d.id));
+    db.interviews = db.interviews.filter(iv => !dupIds.has(iv.id));
+    removed += dups.length;
+  });
+  if (removed > 0) {
+    syncRecruitFromInterviews();
+    saveDb();
+  }
+  res.json({ ok: true, removed, merged });
+});
+
 // ========== Contracts (Labor Contracts) ==========
 app.get('/api/contracts', authMiddleware, contractAccess, (req, res) => {
   res.json(db.contracts || []);
@@ -1192,6 +1235,27 @@ function syncFollowUpFromInterviews() {
 // month: 目标月 YYYY-MM。入职按其「入职时间」所在月计入对应进度行周次；
 //       流失按其「离职时间」所在月计入对应进度行流失——入职月与离职月互不混合。
 //       招聘看板 onboard 是「当前在岗」累计口径（与月份无关），由在职面试人数决定。
+// 招聘看板岗位一律来自招聘进度模块：清理由面试导入自动创建的岗位行（createdBy==='system'
+// 仅可能来自历史自动补建逻辑），同名岗位在招聘进度中存在则以进度数据重建（保留部门/指标
+// 人数与在岗数），否则直接移除。幂等，可重复执行。
+function rebuildBoardPositionsFromProgress() {
+  let removed = 0;
+  db.positions.filter(p => p.createdBy === 'system').forEach(sp => {
+    const prog = db.progress.find(p => p.position === sp.position);
+    db.positions = db.positions.filter(p => p.id !== sp.id);
+    removed++;
+    if (prog && !db.positions.find(p => p.position === sp.position)) {
+      db.positions.unshift({
+        id: genId(), position: sp.position, dept: prog.dept || '',
+        headcount: prog.headcount || 0, deadline: '',
+        stages: { resumeScreen: 0, firstInterview: 0, secondInterview: 0, finalInterview: 0, offer: 0, onboard: (sp.stages && sp.stages.onboard) || 0 },
+        status: 'active', createdBy: 'progress', createdAt: new Date().toISOString().split('T')[0]
+      });
+    }
+  });
+  return removed;
+}
+
 function syncRecruitFromInterviews(month) {
   const target = month || curMonthStr();
   const mon = {};      // target 月的入职周次 / 流失
@@ -1245,18 +1309,8 @@ function syncRecruitFromInterviews(month) {
       });
     }
   });
-  // 招聘看板：有当前在岗人员但看板无该岗位行 → 自动补建
-  Object.keys(onboardCnt).forEach(pos => {
-    if (onboardCnt[pos] > 0 && !db.positions.find(p => p.position === pos)) {
-      db.positions.unshift({
-        id: genId(), position: pos, dept: '',
-        headcount: (db.progress.find(p => p.position === pos) || {}).headcount || 0,
-        deadline: '',
-        stages: { resumeScreen: 0, firstInterview: 0, secondInterview: 0, finalInterview: 0, offer: 0, onboard: onboardCnt[pos] },
-        status: 'active', createdBy: 'system', createdAt: new Date().toISOString().split('T')[0]
-      });
-    }
-  });
+  // 招聘看板岗位一律来自招聘进度模块（清理/重建逻辑见 rebuildBoardPositionsFromProgress）
+  rebuildBoardPositionsFromProgress();
   // 同步招聘看板（岗位漏斗的「已入职」= 当前在岗累计，不随月份变化）
   db.positions.forEach(pos => {
     pos.stages = pos.stages || {};
@@ -1550,6 +1604,9 @@ app.post('/api/progress', authMiddleware, adminOnly, (req, res) => {
       stages: { resumeScreen: 0, firstInterview: 0, secondInterview: 0, finalInterview: 0, offer: 0, onboard: 0 },
       status: 'active', createdBy: req.userId, createdAt: new Date().toISOString().split('T')[0]
     });
+  } else if (item.dept) {
+    // 已有看板岗位行时同步部门（招聘看板的部门信息以招聘进度录入为准）
+    existingPos.dept = item.dept;
   }
   saveDb();
   res.json(item);
@@ -1575,6 +1632,11 @@ app.put('/api/progress/:id', authMiddleware, (req, res) => {
   if (req.body.headcount !== undefined) {
     const pos = db.positions.find(x => x.position === p.position);
     if (pos) pos.headcount = req.body.headcount;
+  }
+  // Sync dept to board（招聘进度录入的部门同步到招聘看板）
+  if (req.body.dept !== undefined) {
+    const pos = db.positions.find(x => x.position === p.position);
+    if (pos) pos.dept = req.body.dept;
   }
   // 注意：不再把当月 totalEntry 写进招聘看板的「已入职」——看板是当前在岗累计口径，
   // 由面试记录同步(syncRecruitFromInterviews)统一维护，避免不同月份的进度数据污染累计值。
@@ -1643,6 +1705,21 @@ app.post('/api/progress/batch-import', authMiddleware, (req, res) => {
         createdAt: new Date().toISOString().split('T')[0]
       });
       added++;
+    }
+    // 部门列（如有）：同步到招聘看板岗位行，看板部门信息以招聘进度为准
+    if (item.dept) {
+      const posRow = db.positions.find(p => p.position === item.position);
+      if (posRow) {
+        posRow.dept = item.dept;
+      } else {
+        const hc = parseInt(item.headcount) || 0;
+        db.positions.unshift({
+          id: genId(), position: item.position, dept: item.dept,
+          headcount: hc, deadline: '',
+          stages: { resumeScreen: 0, firstInterview: 0, secondInterview: 0, finalInterview: 0, offer: 0, onboard: 0 },
+          status: 'active', createdBy: req.userId, createdAt: new Date().toISOString().split('T')[0]
+        });
+      }
     }
   });
   saveDb();
@@ -2186,6 +2263,16 @@ app.get('*', (req, res) => {
       await saveDb();
       console.log('boot: progress month-isolated sync done (' + curMonthStr() + ')');
     } catch (e) { console.error('boot: progress month sync error:', e.message); }
+  }
+  // 招聘看板岗位来源修正（只跑一次）：移除由面试导入自动创建的看板岗位行，
+  // 有招聘进度行的以进度数据重建（部门/指标），此后看板岗位完全由招聘进度驱动。
+  if (!db._boardPositionsFromProgressV1) {
+    try {
+      const removed = rebuildBoardPositionsFromProgress();
+      db._boardPositionsFromProgressV1 = true;
+      await saveDb();
+      console.log('boot: board positions rebuilt from progress, removed ' + removed + ' interview-auto-created row(s)');
+    } catch (e) { console.error('boot: board positions rebuild error:', e.message); }
   }
   // 归属人回填：新版本上线后，把存量销售岗随访的 owner 补齐为面试邀约人（只跑一次）
   if (!bootFreshSeed && !db._ownerAutoSyncDone) {

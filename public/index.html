@@ -1491,6 +1491,9 @@ async function renderInterviews(interviews, positions) {
         <button class="btn btn-outline btn-sm" onclick="exportInterviews()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>导出表格
         </button>
+        <button class="btn btn-outline btn-sm" onclick="dedupeInterviews()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>人员去重
+        </button>
         <button class="btn btn-primary btn-sm" onclick="showAddInterview()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>新增面试
         </button>
@@ -1728,6 +1731,20 @@ async function batchImport() {
     const res = await apiPost('/api/interviews/batch', { items });
     closeModal(); await render(); showToast(`导入 ${res.count} 条记录`);
   } catch(e) { showToast(e.message); }
+}
+
+async function dedupeInterviews() {
+  if (!isAdmin()) { showToast('仅管理员可执行人员去重'); return; }
+  if (!confirm('将按「姓名+手机号」（无手机号时按「姓名+岗位」）识别重复人员：每组保留信息最完整的一条并合并其他记录的非空字段，多余记录删除。确定执行？')) return;
+  try {
+    const r = await apiPost('/api/interviews/dedupe', {});
+    if (r.removed > 0) {
+      showToast(`去重完成：合并 ${r.merged} 个字段，删除 ${r.removed} 条重复记录`);
+    } else {
+      showToast('未发现重复人员');
+    }
+    await render();
+  } catch(e) { showToast(e.message || '去重失败'); }
 }
 
 async function exportInterviews() {
@@ -2856,9 +2873,9 @@ async function showAddProgress() {
   if (!isAdmin()) return;
   showModal(`
     <h3>新增招聘岗位</h3>
-    <div class="form-row"><div><label>岗位</label><input id="fp_pos"></div><div><label>指标人数</label><input type="number" id="fp_hc" value="1" min="1"></div></div>
-    <div class="form-row"><div><label>优先程度</label><select id="fp_pri"><option>高</option><option>中</option><option>低</option></select></div><div><label>紧急程度</label><select id="fp_urg"><option>高</option><option>中</option><option>低</option></select></div></div>
-    <div><label>招聘难度</label><select id="fp_diff"><option>高</option><option selected>中</option><option>低</option></select></div>
+    <div class="form-row"><div><label>岗位</label><input id="fp_pos"></div><div><label>部门</label><input id="fp_dept" placeholder="如：销售部 / 财税部"></div></div>
+    <div class="form-row"><div><label>指标人数</label><input type="number" id="fp_hc" value="1" min="1"></div><div><label>优先程度</label><select id="fp_pri"><option>高</option><option>中</option><option>低</option></select></div></div>
+    <div class="form-row"><div><label>紧急程度</label><select id="fp_urg"><option>高</option><option>中</option><option>低</option></select></div><div><label>招聘难度</label><select id="fp_diff"><option>高</option><option selected>中</option><option>低</option></select></div></div>
     <div><label>进度节点说明</label><input id="fp_node" placeholder="如：8月7日前到岗1人"></div>
     <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="saveProgressNew()">添加</button></div>
   `);
@@ -2869,7 +2886,8 @@ async function saveProgressNew() {
   if (!pos) { showToast('请输入岗位名称'); return; }
   try {
     await apiPost('/api/progress', {
-      position: pos, headcount: parseInt(document.getElementById('fp_hc').value)||1,
+      position: pos, dept: document.getElementById('fp_dept').value.trim(),
+      headcount: parseInt(document.getElementById('fp_hc').value)||1,
       month: progressMonthStr(),
       priority: document.getElementById('fp_pri').value,
       urgency: document.getElementById('fp_urg').value,
