@@ -329,20 +329,17 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 .pos-table,.interview-table{width:100%;border-collapse:collapse}
 .pos-table tr:hover,.interview-table tr:hover{background:#F5F7FA}
 /* Sticky columns for interview table */
-.sticky-col{position:sticky;left:40px;z-index:2;width:44px;min-width:44px}
-.sticky-col2{position:sticky;left:84px;z-index:2;min-width:60px}
+.sticky-col{position:sticky;left:40px;z-index:2;width:92px;min-width:92px;white-space:nowrap}
+.sticky-col2{position:sticky;left:132px;z-index:2;min-width:60px}
 .interview-table th.sticky-col,
 .interview-table th.sticky-col2{z-index:3;background:#EEF4FF}
 .interview-table td.sticky-col,
 .interview-table td.sticky-col2{background:#fff}
 .interview-table tr:hover td.sticky-col,
 .interview-table tr:hover td.sticky-col2{background:#F5F7FA}
-/* 序号列悬浮编辑按钮 */
-.seq-cell{position:relative;text-align:center;cursor:default}
-.seq-num{display:inline-block;min-width:20px;position:relative;z-index:11}
-.seq-edit-btn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scale(0);transition:transform .15s;background:var(--primary);color:#fff;border:none;border-radius:4px;padding:2px 6px;font-size:11px;cursor:pointer;white-space:nowrap;box-shadow:0 2px 6px rgba(22,93,255,.3);z-index:10}
-.interview-table tr:hover .seq-edit-btn{transform:translate(-50%,-50%) scale(1)}
-.seq-edit-btn:hover{background:#0E42D2}
+/* 操作列内的编辑/删除按钮（紧凑版） */
+.op-btn{padding:2px 6px;font-size:11px;line-height:1.4;min-height:24px;border-radius:4px;gap:0}
+.op-btn + .op-btn{margin-left:4px}
 /* Pagination */
 .pagination{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:4px;padding:12px 0;margin-top:8px;border-top:1px solid var(--border)}
 .pagination .active-page{background:var(--primary);color:#fff}
@@ -471,6 +468,7 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
   .modal{max-width:95vw;padding:16px}
   .today-item{flex-direction:column;align-items:flex-start;gap:8px}
   .btn{font-size:13px;padding:7px 12px}
+  .op-btn{font-size:11px;padding:2px 6px;min-height:24px}
   .login-box{padding:28px 20px 20px;border-radius:14px}
   .login-logo{width:52px;height:52px;border-radius:14px;font-size:20px}
   .tabs-mobile{
@@ -1633,7 +1631,7 @@ function filterInterviews() {
     <button class="btn btn-danger btn-sm" style="margin-left:12px" onclick="batchDeleteInterviews()">批量删除</button>
     <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="document.querySelectorAll('.row-checkbox').forEach(cb=>cb.checked=false);updateBatchDeleteBar()">取消</button>
   </div><div style="overflow-x:auto"><table class="interview-table">
-      <tr><th style="width:40px"><input type="checkbox" onchange="toggleAllRows(this)"></th><th class="sticky-col">序号</th><th class="sticky-col2">姓名</th><th>学历</th><th>性别</th><th>岗位</th><th>电话</th><th>渠道</th><th>面试时间</th><th>入职时间</th><th>离职时间</th><th>面试官</th><th>结果</th><th>邀约人</th><th>备注</th><th>操作</th></tr>
+      <tr><th style="width:40px"><input type="checkbox" onchange="toggleAllRows(this)"></th><th class="sticky-col">操作</th><th class="sticky-col2">姓名</th><th>学历</th><th>性别</th><th>岗位</th><th>电话</th><th>渠道</th><th>面试时间</th><th>入职时间</th><th>离职时间</th><th>面试官</th><th>结果</th><th>邀约人</th><th>备注</th></tr>
       ${(() => { const pageData = paginate([...filtered], interviewPage, interviewPageSize); return pageData.map((iv, idx) => {
         const canModify = isAdmin() || iv.createdBy === auth.userId || isInterviewInviter(iv);
         let tag = '';
@@ -1644,12 +1642,10 @@ function filterInterviews() {
         const d1 = normalizeDateField(iv.firstInterviewDate) || '-';
         const d2 = normalizeDateField(iv.secondInterviewDate) || '-';
         const d3 = normalizeDateField(iv.departureDate) || extractDepartureFromNotes(iv.notes) || '-';
-        const seqNum = (interviewPage - 1) * interviewPageSize + idx + 1;
         return `<tr>
           <td style="white-space:nowrap"><input type="checkbox" class="row-checkbox" data-id="${iv.id}" onchange="updateBatchDeleteBar()"></td>
-          <td class="sticky-col seq-cell" style="white-space:nowrap;background:inherit">
-            <span class="seq-num">${seqNum}</span>
-            ${canModify?`<button class="seq-edit-btn" onclick="event.stopPropagation();editInterview('${iv.id}')" title="编辑">编辑</button>`:''}
+          <td class="sticky-col">
+            ${canModify?`<button class="btn btn-outline op-btn" onclick="event.stopPropagation();editInterview('${iv.id}')" title="编辑">编辑</button><button class="btn btn-danger op-btn" onclick="event.stopPropagation();deleteInterview('${iv.id}')" title="删除">删除</button>`:`<span style="font-size:11px;color:var(--text2)">只读</span>`}
           </td>
           <td class="sticky-col2" style="white-space:nowrap"><strong>${escapeHtml(iv.name)}</strong></td>
           <td style="font-size:12px;white-space:nowrap">${escapeHtml(iv.education||'-')}</td>
@@ -1661,9 +1657,6 @@ function filterInterviews() {
           <td style="white-space:nowrap">${escapeHtml(iv.interviewer||'-')}</td><td style="white-space:nowrap">${tag}</td>
           <td style="font-size:11px;color:var(--text2);white-space:nowrap">${escapeHtml(iv.inviter || (window._interviewUserMap||{})[iv.createdBy] || '-')}</td>
           <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${escapeHtml(iv.notes||'')}">${escapeHtml(iv.notes||'-')}</td>
-          <td style="white-space:nowrap">
-            ${canModify?`<button class="btn btn-outline btn-xs" onclick="editInterview('${iv.id}')">编辑</button><button class="btn btn-danger btn-xs" onclick="deleteInterview('${iv.id}')">删除</button>`:`<span style="font-size:11px;color:var(--text2)">只读</span>`}
-          </td>
         </tr>`;
       }).join('') + `</table></div>` +
       renderPagination(filtered.length, interviewPage, interviewPageSize, 'interview', {showCount:false, showPageSize:false}) +
