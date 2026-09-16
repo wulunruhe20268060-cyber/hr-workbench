@@ -177,17 +177,20 @@ function seedDb() {
   yesterday.setDate(yesterday.getDate() - 1);
   const ys = yesterday.toISOString().split('T')[0];
 
-  db.positions = [
-    { id: genId(), position: '高级前端工程师', dept: '技术部', headcount: 2, deadline: fut7,
-      stages: { resumeScreen: 12, firstInterview: 5, secondInterview: 3, finalInterview: 1, offer: 0, onboard: 0 },
-      status: 'active', createdBy: adminId, createdAt: ys },
-    { id: genId(), position: 'HRBP', dept: '人力资源部', headcount: 1, deadline: fut7,
-      stages: { resumeScreen: 8, firstInterview: 4, secondInterview: 2, finalInterview: 1, offer: 1, onboard: 0 },
-      status: 'active', createdBy: adminId, createdAt: ys },
-    { id: genId(), position: '市场运营经理', dept: '市场部', headcount: 1, deadline: ys,
-      stages: { resumeScreen: 15, firstInterview: 6, secondInterview: 3, finalInterview: 2, offer: 0, onboard: 0 },
-      status: 'active', createdBy: adminId, createdAt: '2026-07-15' }
-  ];
+  // 岗位默认种子：仅在库中没有岗位时写入，避免更新迭代时覆盖用户已有的岗位信息
+  if (!db.positions || db.positions.length === 0) {
+    db.positions = [
+      { id: genId(), position: '高级前端工程师', dept: '技术部', headcount: 2, deadline: fut7,
+        stages: { resumeScreen: 12, firstInterview: 5, secondInterview: 3, finalInterview: 1, offer: 0, onboard: 0 },
+        status: 'active', createdBy: adminId, createdAt: ys },
+      { id: genId(), position: 'HRBP', dept: '人力资源部', headcount: 1, deadline: fut7,
+        stages: { resumeScreen: 8, firstInterview: 4, secondInterview: 2, finalInterview: 1, offer: 1, onboard: 0 },
+        status: 'active', createdBy: adminId, createdAt: ys },
+      { id: genId(), position: '市场运营经理', dept: '市场部', headcount: 1, deadline: ys,
+        stages: { resumeScreen: 15, firstInterview: 6, secondInterview: 3, finalInterview: 2, offer: 0, onboard: 0 },
+        status: 'active', createdBy: adminId, createdAt: '2026-07-15' }
+    ];
+  }
 
   // Interviews
   db.interviews = [

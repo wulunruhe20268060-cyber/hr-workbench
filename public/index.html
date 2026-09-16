@@ -1004,6 +1004,33 @@ function paginate(arr, page, pageSize) {
 // ==================== Utils ====================
 function genId() { return 'id_' + Date.now() + '_' + Math.random().toString(36).substr(2,6); }
 function today() { return new Date().toISOString().split('T')[0]; }
+// ===== 招聘看板统计辅助：从面试记录实时统计当月/当年指标 =====
+function bMonthOf(s){ const m=/^(\d{4})-(\d{2})/.exec((s||'').toString().trim()); return m?m[1]+'-'+m[2]:''; }
+function bYearOf(s){ const m=/^(\d{4})/.exec((s||'').toString().trim()); return m?m[1]:''; }
+function bIsOnboarded(iv){
+  const d=(iv&&iv.secondInterviewDate||'').toString().trim();
+  if(d===''||d==='-'||d==='待定'||d==='无') return false;
+  if((iv.result||'')==='淘汰') return false;
+  const notes=(iv&&iv.notes||'').toString();
+  const kw=['离职','辞职','自离','劝退','解聘','离任','开除'];
+  const dep = ((iv&&iv.departureDate||'').toString().trim()!=='' && (iv&&iv.departureDate||'').toString().trim()!=='-') || kw.some(k=>notes.includes(k));
+  return !dep;
+}
+// 统计某岗位：简历数(当月新建面试记录)/初面数(当月初面)/本月入职/本年入职
+function boardStatsFor(posName, interviews, month, year){
+  let resume=0, firstIv=0, obMonth=0, obYear=0;
+  (interviews||[]).forEach(iv=>{
+    if(iv.position!==posName) return;
+    if(bMonthOf(iv.createdAt)===month) resume++;
+    if(iv.firstInterviewDate && bMonthOf(iv.firstInterviewDate)===month) firstIv++;
+    if(bIsOnboarded(iv)){
+      const m=bMonthOf(iv.secondInterviewDate), y=bYearOf(iv.secondInterviewDate);
+      if(m===month) obMonth++;
+      if(y===year) obYear++;
+    }
+  });
+  return {resume, firstIv, obMonth, obYear};
+}
 function daysUntil(d) { if(!d) return Infinity; return Math.ceil((new Date(d) - new Date(today())) / 86400000); }
 function escapeHtml(str) { if(str===null||str===undefined) return ''; str=String(str); return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
@@ -1054,8 +1081,12 @@ function getTodayItems(todos, interviews, hires, positions, contracts) {
       items.push({ type: 'hire_checkin', badge: warn('待随访'), title: `${h.name} - ${h.position}`, meta: `上次: ${lastCheckin}`, data: h, action: 'checkin_hire' });
     }
   });
-  positions.filter(p => p.status==='active' && p.deadline && p.deadline < now).forEach(p => {
-    items.push({ type: 'position_overdue', badge: warn('逾期岗位'), title: `${p.position}`, meta: `截止 ${p.deadline}`, data: p, action: 'view_position' });
+  const _m = progressMonthStr(); const _y = _m.slice(0,4);
+  positions.filter(p => p.status==='active').forEach(p => {
+    const st = boardStatsFor(p.position, interviews, _m, _y);
+    if ((p.headcount||0) > 0 && st.obYear < (p.headcount||0)) {
+      items.push({ type: 'position_gap', badge: warn('缺口岗位'), title: `${p.position}`, meta: `已入职 ${st.obYear}/${p.headcount||0}`, data: p, action: 'view_position' });
+    }
   });
   return items;
 }
@@ -1215,9 +1246,10 @@ async function renderTeamOverview(positions, interviews, todos, hires, users) {
 
 // ==================== Module 0: Recruitment Board ====================
 let boardHistoryCache = [];
-async function renderBoard(positions, boardHistory) {
+async function renderBoard(positions, boardHistory, interviews) {
   boardHistoryCache = boardHistory || [];
   window._boardPositions = positions;
+  interviews = interviews || [];
   let html = '';
   const canEdit = isAdmin();
   
@@ -1235,15 +1267,28 @@ async function renderBoard(positions, boardHistory) {
       </div>
     </div>`;
   
-  const allStages = { resumeScreen:0, firstInterview:0, secondInterview:0, finalInterview:0, offer:0, onboard:0 };
-  positions.forEach(p => { Object.keys(allStages).forEach(k => { allStages[k] += (p.stages[k]||0); }); });
-  const stageNames = { resumeScreen:'简历筛选', firstInterview:'初面', secondInterview:'复试', finalInterview:'终面', offer:'已发Offer', onboard:'已入职' };
-  const stageIcons = { resumeScreen:'简', firstInterview:'初', secondInterview:'复', finalInterview:'终', offer:'发', onboard:'入' };
-  const total = Object.values(allStages).reduce((a,b)=>a+b,0);
+  const bMonth = progressMonthStr();
+  const bYear = bMonth.slice(0,4);
+  // 各岗位当月/当年指标（简历、初面、入职从面试记录实时统计；复试/Offer 沿用看板已存阶段）
+  const boardStats = {};
+  positions.forEach(p => { boardStats[p.position] = boardStatsFor(p.position, interviews, bMonth, bYear); });
+  const sumResume = positions.reduce((a,p)=>a+boardStats[p.position].resume,0);
+  const sumFirst = positions.reduce((a,p)=>a+boardStats[p.position].firstIv,0);
+  const sumSecond = positions.reduce((a,p)=>a+(p.stages&&p.stages.secondInterview||0),0);
+  const sumOffer = positions.reduce((a,p)=>a+(p.stages&&p.stages.offer||0),0);
+  const sumObMonth = positions.reduce((a,p)=>a+boardStats[p.position].obMonth,0);
+  const funnel = [
+    { label:'简历筛选', icon:'简', count:sumResume },
+    { label:'初面', icon:'初', count:sumFirst },
+    { label:'复试', icon:'复', count:sumSecond },
+    { label:'Offer', icon:'发', count:sumOffer },
+    { label:'本月入职', icon:'入', count:sumObMonth }
+  ];
+  const total = funnel.reduce((a,f)=>a+f.count,0);
 
   html += `<div class="board-columns">
-    ${Object.entries(stageNames).map(([key,label]) => `
-      <div class="board-col"><div class="board-col-icon">${stageIcons[key]}</div><div class="board-col-body"><div class="board-col-count">${allStages[key]}</div><div class="board-col-label">${label}</div></div></div>
+    ${funnel.map(f => `
+      <div class="board-col"><div class="board-col-icon">${f.icon}</div><div class="board-col-body"><div class="board-col-count">${f.count}</div><div class="board-col-label">${f.label}</div></div></div>
     `).join('')}
   </div>`;
   if (total>0) html += `<div style="text-align:center;font-size:13px;color:var(--text2);margin-top:10px">${positions.length} 个岗位 | 管道中 ${total} 人</div>`;
@@ -1254,7 +1299,6 @@ async function renderBoard(positions, boardHistory) {
     <input class="search-input" id="posSearch" style="flex:2 1 0;min-width:0" placeholder="搜索岗位 / 部门" oninput="filterPositions()">
     <select class="filter-select" id="posFlow" style="flex:1 1 0;min-width:0" onchange="filterPositions()">
       <option value="">全部流程</option>
-      <option value="overdue">已逾期</option>
       <option value="gap">有缺口</option>
       <option value="full">已满员</option>
     </select>
@@ -1272,20 +1316,19 @@ async function renderBoard(positions, boardHistory) {
       </div>`;
     }
     html += `<div style="overflow-x:auto"><table class="pos-table" id="posTable">
-      <tr>${canEdit?'<th style="width:40px"><input type="checkbox" onchange="toggleAllRows(this)"></th>':''}<th>岗位</th><th>部门</th><th>需求</th><th>截止</th><th>简历</th><th>初面</th><th>复试</th><th>终面</th><th>Offer</th><th>入职</th>${canEdit?'<th>操作</th>':''}</tr>`;
+      <tr>${canEdit?'<th style="width:40px"><input type="checkbox" onchange="toggleAllRows(this)"></th>':''}<th>岗位</th><th>部门</th><th>需求</th><th>简历</th><th>初面</th><th>复试</th><th>Offer</th><th>本月入职</th><th>本年入职</th>${canEdit?'<th>操作</th>':''}</tr>`;
     positions.forEach(p => {
-      const overdue = p.deadline && p.deadline < today();
+      const st = boardStats[p.position] || {resume:0,firstIv:0,obMonth:0,obYear:0};
       html += `<tr data-pid="${p.id}">
         ${canEdit?`<td><input type="checkbox" class="row-checkbox" data-id="${p.id}" onchange="updateBatchDeleteBar()"></td>`:''}
-        <td><strong>${escapeHtml(p.position)}</strong>${overdue?' <span class="chip chip-danger">逾期</span>':''}</td>
+        <td><strong>${escapeHtml(p.position)}</strong></td>
         <td>${escapeHtml(p.dept)}</td><td><input type="number" value="${p.headcount||1}" min="1" style="width:50px;text-align:center;padding:4px;border:1px solid transparent;border-radius:4px;font-size:13px;background:transparent" onchange="updatePositionHeadcount('${p.id}', parseInt(this.value)||1)" onfocus="this.style.borderColor='var(--primary)';this.style.background='#fff'" onblur="this.style.borderColor='transparent';this.style.background='transparent'" title="点击修改需求人数"></td>
-        <td style="color:${overdue?'var(--danger)':'var(--text)'}">${p.deadline||'-'}</td>
-        <td class="batch-cell">${p.stages.resumeScreen||0}</td>
-        <td class="batch-cell">${p.stages.firstInterview||0}</td>
+        <td class="computed-cell">${st.resume}</td>
+        <td class="computed-cell">${st.firstIv}</td>
         <td class="batch-cell">${p.stages.secondInterview||0}</td>
-        <td class="batch-cell">${p.stages.finalInterview||0}</td>
         <td class="batch-cell">${p.stages.offer||0}</td>
-        <td><strong style="color:var(--primary)" class="batch-cell">${p.stages.onboard||0}</strong></td>
+        <td class="computed-cell"><strong style="color:var(--primary)">${st.obMonth}</strong></td>
+        <td class="computed-cell"><strong style="color:var(--primary)">${st.obYear}</strong></td>
         ${canEdit ? `<td class="action-cell"><button class="btn btn-outline btn-xs" onclick="editPosition('${p.id}')">编辑</button><button class="btn btn-danger btn-xs" onclick="deletePosition('${p.id}')">删除</button></td>` : ''}
       </tr>`;
     });
@@ -1339,8 +1382,8 @@ function renderBoardHistory(month) {
   const h = boardHistoryCache.find(x => x.month === month);
   if (!h) { wrap.innerHTML = '<div style="text-align:center;color:var(--text2);padding:14px">该月份无归档数据</div>'; return; }
   const snap = h.snapshot || [];
-  const stageKeys = ['resumeScreen','firstInterview','secondInterview','finalInterview','offer','onboard'];
-  const stageLabels = ['简历筛选','初面','复试','终面','Offer','入职'];
+  const stageKeys = ['resumeScreen','firstInterview','secondInterview','offer','onboard'];
+  const stageLabels = ['简历筛选','初面','复试','Offer','入职'];
   const sum = {}; stageKeys.forEach(k => sum[k] = 0);
   snap.forEach(p => stageKeys.forEach(k => sum[k] += (p.stages && p.stages[k]) || 0));
   const total = stageKeys.reduce((a,k)=>a+sum[k],0);
@@ -1349,11 +1392,11 @@ function renderBoardHistory(month) {
   let t = `<div style="margin-bottom:10px;font-size:13px;color:var(--text2)">归档时间：${escapeHtml(h.archivedAt||'')} ｜ ${snap.length} 个岗位 ｜ 管道合计 ${total} 人</div>
     <div class="board-columns">${stageLabels.map((lb,i)=>`<div class="board-col"><div class="board-col-icon">${histIcons[i]}</div><div class="board-col-body"><div class="board-col-count">${sum[stageKeys[i]]}</div><div class="board-col-label">${lb}</div></div></div>`).join('')}</div>
     <div style="overflow-x:auto;margin-top:10px"><table class="pos-table">
-      <tr><th>岗位</th><th>部门</th><th>需求</th><th>截止</th><th>简历</th><th>初面</th><th>复试</th><th>终面</th><th>Offer</th><th>入职</th></tr>`;
+      <tr><th>岗位</th><th>部门</th><th>需求</th><th>简历</th><th>初面</th><th>复试</th><th>Offer</th><th>入职</th></tr>`;
   snap.forEach(p => {
     const st = p.stages || {};
-    t += `<tr><td><strong>${escapeHtml(p.position)}</strong></td><td>${escapeHtml(p.dept||'')}</td><td>${p.headcount||0}</td><td>${p.deadline||'-'}</td>
-      <td>${st.resumeScreen||0}</td><td>${st.firstInterview||0}</td><td>${st.secondInterview||0}</td><td>${st.finalInterview||0}</td><td>${st.offer||0}</td>
+    t += `<tr><td><strong>${escapeHtml(p.position)}</strong></td><td>${escapeHtml(p.dept||'')}</td><td>${p.headcount||0}</td>
+      <td>${st.resumeScreen||0}</td><td>${st.firstInterview||0}</td><td>${st.secondInterview||0}</td><td>${st.offer||0}</td>
       <td><strong style="color:var(--primary)">${st.onboard||0}</strong></td></tr>`;
   });
   t += `</table></div>`;
@@ -1367,7 +1410,7 @@ function toggleBatchEdit() {
   const saveBtn = document.getElementById('batchSaveBtn');
   if (!table || !saveBtn) return;
   const rows = table.querySelectorAll('tr[data-pid]');
-  const stageKeys = ['resumeScreen','firstInterview','secondInterview','finalInterview','offer','onboard'];
+  const stageKeys = ['secondInterview','offer'];
   
   if (batchEditMode) {
     saveBtn.style.display = '';
@@ -1420,7 +1463,7 @@ async function showAddPosition() {
   showModal(`
     <h3>新增招聘岗位</h3>
     <div class="form-row"><div><label>岗位名称</label><input id="f_pos"></div><div><label>部门</label><input id="f_dept"></div></div>
-    <div class="form-row"><div><label>需求人数</label><input type="number" id="f_hc" value="1" min="1"></div><div><label>截止日期</label><input type="date" id="f_dl" value="${today()}"></div></div>
+    <div class="form-row"><div><label>需求人数</label><input type="number" id="f_hc" value="1" min="1"></div></div>
     <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="addPosition()">确认</button></div>
   `);
 }
@@ -1431,8 +1474,7 @@ async function addPosition() {
   try {
     await apiPost('/api/positions', {
       position: pos, dept: document.getElementById('f_dept').value.trim()||'-',
-      headcount: parseInt(document.getElementById('f_hc').value)||1,
-      deadline: document.getElementById('f_dl').value
+      headcount: parseInt(document.getElementById('f_hc').value)||1
     });
     closeModal(); await render(); showToast('岗位已添加');
   } catch(e) { showToast(e.message); }
@@ -1446,8 +1488,8 @@ async function editPosition(id) {
   showModal(`
     <h3>编辑 ${escapeHtml(p.position)}</h3>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      ${['resumeScreen','firstInterview','secondInterview','finalInterview','offer','onboard'].map((s,i) => {
-        const labels = ['简历筛选','初面','复试','终面','Offer','入职'];
+      ${['resumeScreen','firstInterview','secondInterview','offer','onboard'].map((s,i) => {
+        const labels = ['简历筛选','初面','复试','Offer','入职'];
         return `<div><label>${labels[i]}</label><input type="number" id="es_${s}" value="${p.stages[s]||0}" min="0"></div>`;
       }).join('')}
     </div>
@@ -1456,7 +1498,7 @@ async function editPosition(id) {
 }
 
 async function savePositionEdit(id) {
-  const stages = ['resumeScreen','firstInterview','secondInterview','finalInterview','offer','onboard'];
+  const stages = ['resumeScreen','firstInterview','secondInterview','offer','onboard'];
   const data = {};
   stages.forEach(s => { data[s] = parseInt(document.getElementById('es_'+s).value)||0; });
   try {
@@ -3047,7 +3089,6 @@ async function handlePositionUpload(event) {
     if (r['简历'] !== undefined) stages.resumeScreen = parseInt(r['简历']) || 0;
     if (r['初面'] !== undefined) stages.firstInterview = parseInt(r['初面']) || 0;
     if (r['复试'] !== undefined) stages.secondInterview = parseInt(r['复试']) || 0;
-    if (r['终面'] !== undefined) stages.finalInterview = parseInt(r['终面']) || 0;
     if (r['Offer'] !== undefined) stages.offer = parseInt(r['Offer']) || 0;
     if (r['入职'] !== undefined) stages.onboard = parseInt(r['入职']) || 0;
     
@@ -3057,7 +3098,6 @@ async function handlePositionUpload(event) {
       headcount: (r['需求'] !== undefined && r['需求'] !== '') ? r['需求'] :
                  (r['需求人数'] !== undefined && r['需求人数'] !== '') ? r['需求人数'] :
                  (r['headcount'] !== undefined && r['headcount'] !== '') ? r['headcount'] : '1',
-      deadline: r['截止'] || r['deadline'] || '',
       stages: Object.keys(stages).length > 0 ? stages : undefined
     };
   }).filter(x => x.position);
@@ -3465,7 +3505,7 @@ async function render() {
     renderTeamOverview(positions, interviews, todos, hires, users);
     
     switch(currentTab) {
-      case 0: await renderBoard(positions, boardHistory); break;
+      case 0: await renderBoard(positions, boardHistory, interviews); break;
       case 1: await renderInterviews(interviews, positions); break;
       case 2: await renderTodos(todos); break;
       case 3: renderFollowUp(hires, templates); break;
@@ -4355,9 +4395,11 @@ function filterPositions() {
     if (!p) return;
     const txt = tr.textContent.toLowerCase();
     let ok = !kw || txt.includes(kw);
-    if (flow === 'overdue') ok = ok && p.deadline && p.deadline < today();
-    if (flow === 'gap') ok = ok && (p.stages.onboard || 0) < (p.headcount || 1);
-    if (flow === 'full') ok = ok && (p.stages.onboard || 0) >= (p.headcount || 1);
+    if (flow === 'gap' || flow === 'full') {
+      const st = boardStatsFor(p.position, window._interviewData || [], progressMonthStr(), progressMonthStr().slice(0,4));
+      if (flow === 'gap') ok = ok && st.obYear < (p.headcount || 1);
+      if (flow === 'full') ok = ok && st.obYear >= (p.headcount || 1);
+    }
     tr.style.display = ok ? '' : 'none';
   });
 }
