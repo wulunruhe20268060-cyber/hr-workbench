@@ -1756,6 +1756,40 @@ function monthMetrics(yyyymm) {
   }
   return { interviews: interviewsCount, onboard, attrition };
 }
+// 某年的真实指标：本年面试数(按 firstInterviewDate 所在年) + 本年入职/流失(按对应日期所在年)
+// 全部从「面试管理」interviews 表统计，与 KPI 英雄带口径一致。
+// 入职/流失优先用 boardHistory 同年累计 summary（避免事后改面试表导致历史年度数字被覆盖）；
+// 若该年存在部分归档（如 9 月已归档但 10-12 月未到），未归档月回退实时面试表统计并合并。
+function yearMetrics(yyyy) {
+  let interviews = 0, onboard = 0, attrition = 0;
+  (db.interviews || []).forEach(iv => {
+    if (iv.firstInterviewDate && /^(\d{4})-/.exec(iv.firstInterviewDate)) {
+      if (RegExp.$1 === String(yyyy)) interviews++;
+    }
+  });
+  // 入职/流失：按"归档优先级"分两段汇总
+  // (a) 已归档月份：取快照 summary（不被事后改动污染）
+  const archivedMonths = new Set();
+  (db.boardHistory || []).forEach(h => {
+    if (h.month && h.month.slice(0, 4) === String(yyyy) && h.summary) {
+      onboard += (h.summary.onboard || 0);
+      attrition += (h.summary.attrition || 0);
+      archivedMonths.add(h.month);
+    }
+  });
+  // (b) 未归档月份：实时面试表统计（一般是当前月和未来月份）
+  (db.interviews || []).forEach(iv => {
+    if (isOnboarded(iv) && iv.secondInterviewDate && iv.secondInterviewDate.slice(0, 4) === String(yyyy)) {
+      const m = monthOfDate(iv.secondInterviewDate);
+      if (m && !archivedMonths.has(m)) onboard++;
+    }
+    if (isDeparted(iv) && iv.departureDate && iv.departureDate.slice(0, 4) === String(yyyy)) {
+      const m = monthOfDate(iv.departureDate);
+      if (m && !archivedMonths.has(m)) attrition++;
+    }
+  });
+  return { interviews, onboard, attrition };
+}
 function pctTrend(value, prev) {
   if (!prev) return value > 0 ? 100 : 0;
   return Math.round((value - prev) / prev * 100);
@@ -1808,6 +1842,7 @@ app.delete('/api/board-history/:month', authMiddleware, adminOnly, (req, res) =>
 // ========== KPI 真实环比（本月 vs 上月）==========
 // 月份参数：默认取服务器当前月份；前端可传 ?month=YYYY-MM 指定为「招聘进度」当前月，
 // 与招聘看板岗位列表英雄带口径完全对齐，全部从「面试管理」interviews 表统计。
+// 同时返回本年累计（yearInterviews/yearOnboard/yearAttrition）与本月完成率（completionRate）。
 function prevMonthOf(yyyymm) {
   const m = /^(\d{4})-(\d{2})$/.exec((yyyymm || '').trim());
   if (!m) return prevMonthStr(new Date());
@@ -1815,25 +1850,48 @@ function prevMonthOf(yyyymm) {
   if (mo < 1) { mo = 12; y -= 1; }
   return monthStr(y, mo);
 }
+function prevYearOf(yyyy) {
+  const m = /^(\d{4})$/.exec((String(yyyy) || '').trim());
+  if (!m) return String(new Date().getFullYear() - 1);
+  return String(parseInt(m[1], 10) - 1);
+}
+function completionRate(onboard, interviews) {
+  if (!interviews) return 0;
+  return Math.round((onboard / interviews) * 100);
+}
 app.get('/api/kpi-trend', authMiddleware, (req, res) => {
   const cur = (req.query.month && /^\d{4}-\d{2}$/.test(req.query.month)) ? req.query.month : curMonthStr();
   const prev = prevMonthOf(cur);
   const curM = monthMetrics(cur);
   const prevM = monthMetrics(prev);
+  const curY = cur.slice(0, 4);
+  const prevY = prevYearOf(curY);
+  const curYM = yearMetrics(curY);
+  const prevYM = yearMetrics(prevY);
   const hasPrev = (db.boardHistory || []).some(h => h.month === prev)
     || prevM.interviews > 0 || prevM.onboard > 0 || prevM.attrition > 0;
+  const hasPrevYear = prevYM.interviews > 0 || prevYM.onboard > 0 || prevYM.attrition > 0;
   const build = (value, prevVal, increaseGood) => {
     const pct = pctTrend(value, prevVal);
     const dir = value > prevVal ? 'up' : (value < prevVal ? 'down' : 'flat');
     const good = dir === 'flat' ? true : (dir === 'up' ? increaseGood : !increaseGood);
     return { value, prev: prevVal, pct, dir, good };
   };
+  // 完成率：本月入职 / 本月面试 × 100（口径=面试到入职的当月转化率）
+  const curRate = completionRate(curM.onboard, curM.interviews);
+  const prevRate = completionRate(prevM.onboard, prevM.interviews);
   res.json({
-    month: cur, prevMonth: prev, hasPrev,
+    month: cur, prevMonth: prev,
+    year: curY, prevYear: prevY,
+    hasPrev, hasPrevYear,
     metrics: {
       interviews: build(curM.interviews, prevM.interviews, true),
       onboard: build(curM.onboard, prevM.onboard, true),
-      attrition: build(curM.attrition, prevM.attrition, false)
+      attrition: build(curM.attrition, prevM.attrition, false),
+      completionRate: build(curRate, prevRate, true),
+      yearInterviews: build(curYM.interviews, prevYM.interviews, true),
+      yearOnboard: build(curYM.onboard, prevYM.onboard, true),
+      yearAttrition: build(curYM.attrition, prevYM.attrition, false)
     }
   });
 });

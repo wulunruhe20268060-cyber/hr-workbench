@@ -445,10 +445,14 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 .team-stat .kpi-icon{width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px;font-weight:700;color:#fff}
 .team-stat:nth-child(1) .kpi-icon{background:linear-gradient(135deg,#409EFF,#165DFF)}
 .team-stat:nth-child(2) .kpi-icon{background:linear-gradient(135deg,#67C23A,#3D8B40)}
-.team-stat:nth-child(3) .kpi-icon{background:linear-gradient(135deg,#F56C6C,#C45656)}
-.team-stat:nth-child(4) .kpi-icon{background:linear-gradient(135deg,#E6A23C,#B8821C)}
-.team-stat:nth-child(5) .kpi-icon{background:linear-gradient(135deg,#9254DE,#722ED1)}
-.team-stat:nth-child(6) .kpi-icon{background:linear-gradient(135deg,#13C2C2,#08979C)}
+.team-stat:nth-child(3) .kpi-icon{background:linear-gradient(135deg,#9254DE,#722ED1)}
+.team-stat:nth-child(4) .kpi-icon{background:linear-gradient(135deg,#F56C6C,#C45656)}
+.team-stat:nth-child(5) .kpi-icon{background:linear-gradient(135deg,#13C2C2,#08979C)}
+.team-stat:nth-child(6) .kpi-icon{background:linear-gradient(135deg,#3D8B40,#1F6F2F)}
+.team-stat:nth-child(7) .kpi-icon{background:linear-gradient(135deg,#E0407A,#A93060)}
+.team-stat:nth-child(8) .kpi-icon{background:linear-gradient(135deg,#E6A23C,#B8821C)}
+.team-stat:nth-child(9) .kpi-icon{background:linear-gradient(135deg,#FF85C0,#D660A0)}
+.team-stat:nth-child(10) .kpi-icon{background:linear-gradient(135deg,#909399,#606266)}
 .team-stat .kpi-body{display:flex;flex-direction:column;gap:4px;min-width:0;justify-content:center}
 .team-stat .kpi-main{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;line-height:1}
 .team-stat .num{font-size:34px;font-weight:700;line-height:1;color:#1D2129;font-variant-numeric:tabular-nums;letter-spacing:-.5px;text-align:left}
@@ -1215,38 +1219,48 @@ async function handleTodayAction(action, id) {
 }
 
 // ==================== Team Overview (Admin) ====================
+// 团队概览（KPI 英雄带）：招聘看板 / 面试管理两页顶部展示，统一以下 10 项指标：
+//   本月面试 / 本月入职 / 本月完成率 / 本月离职 / 本年面试 / 本年入职 / 本年离职 / 已完成待办 / 随访新人数 / 团队成员
+// 月份口径以「招聘进度」当前月为准（progressMonthStr()）。
 async function renderTeamOverview(positions, interviews, todos, hires, users) {
-  // 英雄带（KPI卡片）仅在招聘看板(0)、面试管理(1)两页显示，其他模块不出现
   if (![0, 1].includes(currentTab) || !isAdmin()) { document.getElementById('teamOverview').innerHTML = ''; return; }
-  // 月份口径统一以「招聘进度」当前月为准（progressMonthStr()），与岗位列表英雄带一致
   const curMonth = progressMonthStr();
+  // 本月面试数 = 当月有初面日期(firstInterviewDate)的面试条数（数据源：面试管理）
   const monthInterviews = interviews.filter(iv => iv.firstInterviewDate && bMonthOf(iv.firstInterviewDate) === curMonth).length;
   const completedTodos = todos.filter(t => t.completed).length;
   const activeHires = hires.filter(h => {
     const allCheckins = h.periods ? h.periods.reduce((sum,p) => sum.concat(p.checkins||[]), []) : (h.checkins||[]);
     return allCheckins.length > 0;
   }).length;
-  
-  // 真实环比：本月 vs 上月（月份以招聘进度为准，与岗位列表英雄带一致）
+  const memberCount = (users || []).filter(u => u.role === 'member').length;
+
+  // 真实环比：本月 vs 上月（完成率环比）；本年 vs 去年（本年累计环比）
   let trend = null;
   try { trend = await apiGet('/api/kpi-trend?month=' + encodeURIComponent(curMonth)); } catch(e) { trend = null; }
   const M = trend && trend.metrics ? trend.metrics : null;
-  const trendHtml = (m) => {
-    if (!trend || !trend.hasPrev || !m) return '';
-    if (m.dir === 'flat') return '<div class="kpi-trend">较上月持平</div>';
+  const trendHtml = (m, unit) => {
+    if (!trend || !m) return '';
+    // 完成率按百分点展示，其他按百分比展示
+    if (m.dir === 'flat') return '<div class="kpi-trend">较' + (unit === 'rate' ? '上月' : (unit === 'year' ? '去年' : '上月')) + '持平</div>';
     const arrow = m.dir === 'up' ? '↑' : '↓';
-    return `<div class="kpi-trend${m.good ? '' : ' down'}">${arrow}${Math.abs(m.pct)}% 环比</div>`;
+    const tag = unit === 'rate' ? 'pp' : '%';
+    return `<div class="kpi-trend${m.good ? '' : ' down'}">${arrow}${Math.abs(m.pct)}${tag} ${unit === 'rate' ? '环比' : (unit === 'year' ? '同比' : '环比')}</div>`;
   };
   const val = (m, fallback) => (M && m ? m.value : fallback);
-  
+  const fmtRate = (v) => (v == null ? '—' : (v + '%'));
+
   document.getElementById('teamOverview').innerHTML = `
     <div class="team-overview">
-      <div class="team-stat"><div class="kpi-icon">面</div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.interviews,monthInterviews)}</div>${trendHtml(M&&M.interviews)}</div><div class="label">本月面试数</div></div></div>
-      <div class="team-stat"><div class="kpi-icon">入</div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.onboard,0)}</div>${trendHtml(M&&M.onboard)}</div><div class="label">本月入职数</div></div></div>
-      <div class="team-stat"><div class="kpi-icon">流</div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.attrition,0)}</div>${trendHtml(M&&M.attrition)}</div><div class="label">本月<span class="kw-danger">流失</span>数</div></div></div>
-      <div class="team-stat"><div class="kpi-icon">团</div><div class="kpi-body"><div class="kpi-main"><div class="num">${memberCount}</div></div><div class="label">团队成员</div></div></div>
+      <div class="team-stat"><div class="kpi-icon">面</div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.interviews,monthInterviews)}</div>${trendHtml(M&&M.interviews,'mo')}</div><div class="label">本月面试</div></div></div>
+      <div class="team-stat"><div class="kpi-icon">入</div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.onboard,0)}</div>${trendHtml(M&&M.onboard,'mo')}</div><div class="label">本月入职</div></div></div>
+      <div class="team-stat"><div class="kpi-icon">率</div><div class="kpi-body"><div class="kpi-main"><div class="num">${fmtRate(M && M.completionRate && M.completionRate.value)}</div>${trendHtml(M&&M.completionRate,'rate')}</div><div class="label">本月完成率</div></div></div>
+      <div class="team-stat"><div class="kpi-icon">离</div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.attrition,0)}</div>${trendHtml(M&&M.attrition,'mo')}</div><div class="label">本月离职</div></div></div>
+      <div class="team-stat"><div class="kpi-icon">年</div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.yearInterviews,0)}</div>${trendHtml(M&&M.yearInterviews,'year')}</div><div class="label">本年面试</div></div></div>
+      <div class="team-stat"><div class="kpi-icon">入</div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.yearOnboard,0)}</div>${trendHtml(M&&M.yearOnboard,'year')}</div><div class="label">本年入职</div></div></div>
+      <div class="team-stat"><div class="kpi-icon">离</div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.yearAttrition,0)}</div>${trendHtml(M&&M.yearAttrition,'year')}</div><div class="label">本年离职</div></div></div>
       <div class="team-stat"><div class="kpi-icon">办</div><div class="kpi-body"><div class="kpi-main"><div class="num">${completedTodos}</div></div><div class="label">已完成待办</div></div></div>
-      <div class="team-stat"><div class="kpi-icon">随</div><div class="kpi-body"><div class="kpi-main"><div class="num">${activeHires}</div></div><div class="label">随访中新人</div></div></div>
+      <div class="team-stat"><div class="kpi-icon">随</div><div class="kpi-body"><div class="kpi-main"><div class="num">${activeHires}</div></div><div class="label">随访新人数</div></div></div>
+      <div class="team-stat"><div class="kpi-icon">团</div><div class="kpi-body"><div class="kpi-main"><div class="num">${memberCount}</div></div><div class="label">团队成员</div></div></div>
     </div>`;
 }
 
