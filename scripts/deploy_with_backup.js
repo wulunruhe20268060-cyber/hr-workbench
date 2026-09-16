@@ -199,7 +199,11 @@ async function legacyBackup(tk) {
       await sleep(8000);
       try {
         const h = await req(BASE + '/api/health');
-        if (h.status !== 200) { last = 'health ' + h.status; continue; }
+        if (h.status !== 200 || !h.body || typeof h.body !== 'object' || !h.body.ok) {
+          last = 'old-version';
+          console.log('      线上仍是旧版本（/api/health 不可用），继续等待…');
+          continue;
+        }
         last = h.body;
         const newVer = h.body.version && preVer && h.body.version !== preVer;
         const restarted = (h.body.uptime || 999) < 120 && (Date.now() - pushAt) > 45000;
