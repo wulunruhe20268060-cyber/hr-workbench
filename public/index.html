@@ -337,6 +337,12 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 .interview-table td.sticky-col2{background:#fff}
 .interview-table tr:hover td.sticky-col,
 .interview-table tr:hover td.sticky-col2{background:#F5F7FA}
+/* 序号列悬浮编辑按钮 */
+.seq-cell{position:relative;text-align:center;cursor:default}
+.seq-num{display:inline-block;min-width:20px}
+.seq-edit-btn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);opacity:0;transition:opacity .15s;background:var(--primary);color:#fff;border:none;border-radius:4px;padding:2px 6px;font-size:11px;cursor:pointer;white-space:nowrap;box-shadow:0 2px 6px rgba(22,93,255,.3);z-index:10}
+.interview-table tr:hover .seq-edit-btn{opacity:1}
+.seq-edit-btn:hover{background:#0E42D2}
 /* Pagination */
 .pagination{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:4px;padding:12px 0;margin-top:8px;border-top:1px solid var(--border)}
 .pagination .active-page{background:var(--primary);color:#fff}
@@ -1641,7 +1647,10 @@ function filterInterviews() {
         const seqNum = (interviewPage - 1) * interviewPageSize + idx + 1;
         return `<tr>
           <td style="white-space:nowrap"><input type="checkbox" class="row-checkbox" data-id="${iv.id}" onchange="updateBatchDeleteBar()"></td>
-          <td class="sticky-col" style="white-space:nowrap;background:inherit">${seqNum}</td>
+          <td class="sticky-col seq-cell" style="white-space:nowrap;background:inherit">
+            <span class="seq-num">${seqNum}</span>
+            ${canModify?`<button class="seq-edit-btn" onclick="event.stopPropagation();editInterview('${iv.id}')" title="编辑">编辑</button>`:''}
+          </td>
           <td class="sticky-col2" style="white-space:nowrap"><strong>${escapeHtml(iv.name)}</strong></td>
           <td style="font-size:12px;white-space:nowrap">${escapeHtml(iv.education||'-')}</td>
           <td style="font-size:12px;white-space:nowrap">${escapeHtml(iv.gender||'-')}</td>
