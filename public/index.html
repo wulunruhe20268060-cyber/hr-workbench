@@ -1480,21 +1480,39 @@ function toggleBoardHistory() {
 }
 
 // 归档指定月份（默认归档当前招聘进度月份；用户需求：归档本月按钮）
+// 同月已有归档时弹 confirm 确认覆盖，确认后传 overwrite=true 重新写入（2026-09-17 应需求支持覆盖）
 async function archiveBoard(month) {
   month = month || progressMonthStr();
+  const existed = (boardHistoryCache || []).find(h => h.month === month);
+  let overwrite = false;
+  if (existed) {
+    overwrite = confirm(`${month} 已有归档，是否覆盖旧版本？\n确定后将用当前招聘看板数据替换历史归档快照。`);
+    if (!overwrite) return; // 用户取消
+  }
   try {
-    const r = await apiPost('/api/board-history/archive', { month });
-    showToast(r.existed ? `${r.month} 已有归档，未重复保存` : `${r.month} 看板已归档（${r.positions||0} 个岗位）`);
+    const r = await apiPost('/api/board-history/archive', { month, overwrite });
+    if (r.overwritten) {
+      showToast(`${month} 看板已覆盖旧版本（${r.positions||0} 个岗位）`);
+    } else if (r.existed) {
+      showToast(`${month} 已有归档，未重复保存`);
+    } else {
+      showToast(`${month} 看板已归档（${r.positions||0} 个岗位）`);
+    }
     await render();
   } catch(e) { showToast(e.message); }
 }
-// 手动同步：把当前招聘进度月份的岗位/部门/需求，推送到招聘看板岗位详情（与自动同步并存）
+// 手动同步：把当前招聘进度月份的岗位/部门/需求，**清空重建**到招聘看板岗位详情（与自动同步并存）
+// 用户需求（2026-09-17）：岗位详情只保留本月同步过来的数据，不保留之前的岗位信息。
+// 因清空动作不可逆（覆盖全部岗位，包括手动维护的 stages 累计），必须 confirm 才执行。
 async function syncBoardFromProgress() {
   if (!isAdmin()) { showToast('仅管理员可操作'); return; }
+  const month = progressMonthStr();
+  const msg = `「从招聘进度同步」将清空所有岗位，并仅保留 ${month} 同步过来的数据。\n\n⚠ 此操作不可逆：之前手动维护的岗位信息、各阶段累计数据会被清空。\n\n确定继续吗？`;
+  if (!confirm(msg)) return;
   try {
-    const r = await apiPost('/api/board/sync-from-progress', { month: progressMonthStr() });
+    const r = await apiPost('/api/board/sync-from-progress', { month });
     await render();
-    showToast(`已从招聘进度同步 ${r.month||progressMonthStr()}：${r.added} 个新建、${r.updated} 个更新`);
+    showToast(`已从招聘进度同步 ${r.month||month}：清空 ${r.cleared||0} 个、新建 ${r.added||0} 个`);
   } catch(e) { showToast('同步失败：' + e.message); }
 }
 // 手动同步：按当前招聘进度月份从面试管理面试表中按岗位/月份汇总简历/初面，写入月度快照（与实时统计并存）

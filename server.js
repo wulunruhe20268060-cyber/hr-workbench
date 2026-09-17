@@ -1784,19 +1784,28 @@ function pctTrend(value, prev) {
   if (!prev) return value > 0 ? 100 : 0;
   return Math.round((value - prev) / prev * 100);
 }
-// 归档指定月份(YYYY-MM)。幂等：同月已有记录则跳过不覆盖。
-function archiveBoardSnapshot(month) {
+// 归档指定月份(YYYY-MM)。opts.overwrite=true 时同月已有归档会被覆盖（删除旧版本重新写入）；
+// 默认 overwrite=false，幂等跳过已有归档。
+function archiveBoardSnapshot(month, opts) {
   if (!month) return { archived: false, existed: false, month: null, reason: 'no-month' };
+  const overwrite = !!(opts && opts.overwrite);
   if (!Array.isArray(db.boardHistory)) db.boardHistory = [];
-  if (db.boardHistory.some(h => h.month === month)) return { archived: false, existed: true, month };
+  const existed = db.boardHistory.findIndex(h => h.month === month);
+  if (existed >= 0 && !overwrite) {
+    return { archived: false, existed: true, month, positions: (db.boardHistory[existed].snapshot || []).length };
+  }
+  if (existed >= 0 && overwrite) {
+    db.boardHistory.splice(existed, 1); // 删除旧版本
+  }
   db.boardHistory.unshift({
     id: genId(), month,
     archivedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
     snapshot: boardSnapshotOf(db.positions),
-    summary: monthMetrics(month)
+    summary: monthMetrics(month),
+    overwritten: overwrite
   });
   saveDb();
-  return { archived: true, existed: false, month, positions: db.positions.length };
+  return { archived: true, existed: false, month, positions: db.positions.length, overwritten: overwrite };
 }
 // 每月1号启动时归档上个月的看板结果
 function maybeAutoArchiveBoard() {
@@ -1814,9 +1823,10 @@ app.get('/api/board-history', authMiddleware, (req, res) => {
   })));
 });
 app.post('/api/board-history/archive', authMiddleware, adminOnly, (req, res) => {
-  // 手动归档指定月份；不传 month 默认归档上月
+  // 手动归档指定月份；不传 month 默认归档上月；overwrite=true 覆盖同月已有归档
   const month = (req.body && req.body.month) || prevMonthStr(new Date());
-  const r = archiveBoardSnapshot(month);
+  const overwrite = !!(req.body && req.body.overwrite);
+  const r = archiveBoardSnapshot(month, { overwrite });
   if (!r.archived && !r.existed) return res.status(400).json({ error: '归档失败：' + (r.reason || '未知原因') });
   res.json(r);
 });
@@ -2087,32 +2097,34 @@ app.post('/api/progress/batch-import', authMiddleware, (req, res) => {
   res.json({ ok: true, added, updated, total: added + updated });
 });
 
-// 手动同步：将指定月份（默认当月）招聘进度行的岗位/部门/需求，推送到招聘看板 positions。
-// 与「保存进度时自动同步」并存——本接口用于把进度模块作为唯一源头、强制把看板岗位详情刷成进度值
-// （新建缺失岗位、更新部门/需求、按进度岗位名重命名为新名）。
+// 手动同步：将指定月份（默认当月）招聘进度行的岗位/部门/需求，**清空重建**到招聘看板 positions。
+// 与「保存进度时自动同步」并存——本接口用于把进度模块作为唯一源头、强制把看板岗位详情清空并刷成当月进度值。
+// 行为：① 清空 db.positions 所有岗位；② 按本月进度行新建岗位（createdBy='progress'）。
+// 用户需求（2026-09-17）：岗位详情只保留本月同步过来的数据，不保留之前的岗位信息。
 app.post('/api/board/sync-from-progress', authMiddleware, adminOnly, (req, res) => {
   const month = (req.body && req.body.month) || curMonthStr();
   const rows = (db.progress || []).filter(p => p.month === month);
-  let added = 0, updated = 0, renamed = 0;
   const today = new Date().toISOString().split('T')[0];
+  const cleared = (db.positions || []).length;
+  // 1) 清空所有岗位
+  db.positions = [];
+  // 2) 按本月进度行重建（保持进度数组的顺序）
   rows.forEach(prog => {
     if (!prog.position) return;
-    let pos = db.positions.find(x => x.position === prog.position);
-    if (!pos) {
-      db.positions.unshift({
-        id: genId(), position: prog.position, dept: prog.dept || '',
-        headcount: prog.headcount || 0, deadline: '',
-        stages: { resumeScreen: 0, firstInterview: 0, secondInterview: 0, finalInterview: 0, offer: 0, onboard: 0 },
-        status: 'active', createdBy: 'progress', createdAt: today
-      });
-      added++;
-    } else {
-      if (prog.dept && pos.dept !== prog.dept) { pos.dept = prog.dept; updated++; }
-      if (prog.headcount !== undefined && pos.headcount !== prog.headcount) { pos.headcount = prog.headcount; updated++; }
-    }
+    db.positions.push({
+      id: genId(),
+      position: prog.position,
+      dept: prog.dept || '',
+      headcount: prog.headcount || 0,
+      deadline: '',
+      stages: { resumeScreen: 0, firstInterview: 0, secondInterview: 0, finalInterview: 0, offer: 0, onboard: 0 },
+      status: 'active',
+      createdBy: 'progress',
+      createdAt: today
+    });
   });
   saveDb();
-  res.json({ ok: true, month, added, updated, renamed, total: rows.length });
+  res.json({ ok: true, month, cleared, added: db.positions.length, total: rows.length });
 });
 
 // 手动同步：将指定月份（默认当月）面试管理面试表的简历/初面，按岗位+月份汇总到
