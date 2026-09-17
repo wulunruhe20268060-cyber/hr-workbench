@@ -1423,7 +1423,7 @@ async function renderBoard(positions, boardHistory, interviews, progress) {
   }
   html += `</div>`;
 
-  // ===== 历史看板（每月1号自动归档上月快照，可手动归档/回溯/删除重存）=====
+  // ===== 历史看板（每月1号自动归档上月快照，可手动归档本月/回溯/删除重存）=====
   // 默认折叠状态，点击卡片标题或「展开」按钮单独展开查看（2026-09-17 应需求改为默认折叠）
   const hist = boardHistoryCache;
   html += `<div class="card" id="histCard"><div class="card-header" style="cursor:pointer" onclick="toggleBoardHistory()">
