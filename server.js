@@ -40,6 +40,29 @@ app.use(express.static(path.join(__dirname, 'public'), {
 }));
 app.disable('etag');
 
+// 写操作「落盘后再响应」：所有 POST/PUT/DELETE 的 JSON 响应都等数据写入 Postgres 完成，
+// 落盘失败时在响应体里带 _persisted:false，前端据此提示用户，避免"看着保存成功、刷新却没了"。
+// （2026-09-17 用户反馈：合同管理员王燕上传陈培阳随访记录后刷新数据丢失）
+app.use((req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  const origJson = res.json.bind(res);
+  let settled = false;
+  res.json = (body) => {
+    if (settled) return origJson(body);
+    settled = true;
+    // 最多等 8 秒，避免数据库长时间不可用时页面卡死（后台仍会继续重试写入）
+    const guard = new Promise(r => setTimeout(() => r(undefined), 8000));
+    Promise.race([saveChain, guard]).then(ok => {
+      if (ok === false && body && typeof body === 'object' && !Array.isArray(body)) {
+        body = { ...body, _persisted: false };
+      }
+      return origJson(body);
+    }).catch(() => origJson(body));
+    return res;
+  };
+  next();
+});
+
 // ========== Database ==========
 let db = { users: [], positions: [], interviews: [], todos: [], templates: [], hires: [], progress: [], contracts: [], jobSpecs: [], candidates: [], questionBanks: [], hiringDecisions: [], probations: [], boardHistory: [], boardMonthlyStats: {} };
 let tokens = {};
@@ -60,15 +83,31 @@ function loadDb() {
   } catch (e) { console.error('DB load error:', e.message); }
 }
 
+// 建立（或重建）Postgres 连接。
+// 2026-09-17 加固：Neon/Render 的闲置连接会被服务端断开，若不自动重建，后续写入会全部失败并静默降级到
+// 容器临时文件（重启即丢）。这里统一提供"连接失效 → 重建"的能力，写入路径与心跳共用。
+async function connectPg() {
+  const pg = require('pg');
+  if (pgClient) { try { await pgClient.end(); } catch (e) {} pgClient = null; }
+  const c = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+  // 必须挂 error 监听：否则连接意外断开时 Node 会因未处理的 error 事件直接退出进程，
+  // 表现为"服务突然重启 + 内存里未落盘的数据回退"。
+  c.on('error', (e) => {
+    lastPgError = 'client: ' + e.message;
+    console.error('⚠️ PG 连接异常（已标记重建）:', e.message);
+    if (pgClient === c) pgClient = null;
+  });
+  await c.connect();
+  await c.query('CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)');
+  pgClient = c;
+  return c;
+}
+
 // Load db from Postgres (if DATABASE_URL) or local file (fallback)
 async function initStore() {
   if (process.env.DATABASE_URL) {
     try {
-      const pg = require('pg');
-      pgClient = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
-      await pgClient.connect();
-      await pgClient.query('CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)');
-      const r = await pgClient.query("SELECT value FROM kv WHERE key='db'");
+      const r = await connectPg().then(c => c.query("SELECT value FROM kv WHERE key='db'"));
       if (r.rows.length > 0) {
         db = JSON.parse(r.rows[0].value);
         console.log('DB loaded from Postgres');
@@ -98,31 +137,60 @@ async function initStore() {
   loadDb();
 }
 
-// Save db -> Postgres (if active) or local file (fallback). Fire-and-forget safe.
-async function saveDb() {
-  if (usePg && pgClient) {
-    // Postgres 写入失败会静默退到本地临时文件（Render 重新部署即丢失），
-    // 这里对瞬时故障重试一次，仍失败时才降级并打印明确告警（2026-09-17 加固）。
-    for (let attempt = 0; attempt < 2; attempt++) {
+// Save db -> Postgres (if active) or local file (fallback).
+// 2026-09-17 加固（用户反馈「王燕上传随访记录保存后刷新丢失」）：
+// 1) 串行化：所有写入排同一条链，避免并发写导致的"后写覆盖前写"与响应顺序错乱；
+// 2) 失败重试 + 断线自动重连，仍失败才降级写本地临时文件并打印明确告警；
+// 3) 返回 Promise<boolean>（true=已确认写入数据库），写操作路由会等它完成后再响应，
+//    保证「前端提示保存成功」= 数据真的落盘。
+let saveChain = Promise.resolve();
+let lastSaveOkAt = '';
+let lastPgOkAt = '';
+let lastSaveErr = '';
+let saveQueueLen = 0;
+
+function saveDb() {
+  saveQueueLen++;
+  const run = saveChain.then(() => doSaveDb(), () => doSaveDb());
+  saveChain = run.then(() => { saveQueueLen--; }, () => { saveQueueLen--; });
+  return run;
+}
+
+async function doSaveDb() {
+  const at = new Date().toISOString();
+  db._updatedAt = at;
+  const payload = JSON.stringify(db);
+  if (usePg) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
+        if (!pgClient) await connectPg();
         await pgClient.query(
           "INSERT INTO kv(key,value) VALUES('db',$1) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",
-          [JSON.stringify(db)]
+          [payload]
         );
-        return;
+        lastSaveOkAt = at; lastPgOkAt = at; lastSaveErr = '';
+        return true;
       } catch (e) {
-        if (attempt === 0) { await new Promise(r => setTimeout(r, 300)); continue; }
-        console.error('PG save error（已重试一次仍失败，降级为文件写入，重启可能丢失）:', e.message);
+        lastSaveErr = e.message;
+        lastPgError = 'save: ' + e.message;
+        console.error(`PG save error（第 ${attempt + 1} 次）:`, e.message);
+        if (pgClient) { try { await pgClient.end(); } catch (_) {} }
+        pgClient = null; // 下次循环重连
+        await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
       }
     }
+    console.error('⚠️ Postgres 连续写入失败，已降级写本地文件（重新部署会丢失）：' + lastSaveErr);
   }
-  // file fallback
+  // file fallback：未启用 Postgres 时，写文件就是它的持久化手段（视为成功）；
+  // 若是因为 Postgres 连续失败才降级到这里，必须如实返回 false，让前端提示用户。
   try {
     const dir = path.dirname(DB_PATH);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(DB_PATH + '.tmp', JSON.stringify(db, null, 2), 'utf8');
     fs.renameSync(DB_PATH + '.tmp', DB_PATH);
-  } catch (e) { console.error('DB save error:', e.message); }
+    lastSaveOkAt = at;
+    return !usePg;
+  } catch (e) { console.error('DB save error:', e.message); return false; }
 }
 
 function hashPass(password, salt) {
@@ -1611,6 +1679,12 @@ app.get('/api/health', (req, res) => {
     version: BUILD_ID,
     store: usePg ? 'postgres' : 'file',
     pgError: lastPgError || '',
+    // 写入健康度（2026-09-17 新增）：lastSaveOkAt = 最近一次成功写入数据库的时间：
+    // 若它长时间不更新、或 saveErr 非空，说明写入链路有问题（此时改动会在实例重启后回退）。
+    pgSaveOkAt: lastSaveOkAt || '',
+    pgOkAt: lastPgOkAt || '',
+    saveErr: lastSaveErr || '',
+    saveQueue: saveQueueLen,
     uptime: Math.round(process.uptime()),
     at: new Date().toISOString()
   });
@@ -1622,6 +1696,9 @@ app.get('/api/backup/info', authMiddleware, (req, res) => {
     version: BUILD_ID,
     store: usePg ? 'postgres' : 'file',
     pgError: lastPgError || '',
+    pgSaveOkAt: lastSaveOkAt || '',
+    pgOkAt: lastPgOkAt || '',
+    saveErr: lastSaveErr || '',
     counts: dbCounts(),
     lastSnapshotAt: db._lastSnapshotAt || '',
     updatedAt: db._updatedAt || ''
@@ -2951,6 +3028,22 @@ app.get('*', (req, res) => {
       res.status(500).json({ error: '生成文档失败：' + e.message });
     }
   });
+
+  // 连接保活：Neon/Render 会悄悄断开闲置连接，若不主动探测并重建，之后的写入会全部失败
+  // （表现为"数据只在内存里、实例重启后回退"）。每 4 分钟一次，纯只读探测。
+  const _pgHeartbeat = setInterval(async () => {
+    if (!usePg) return;
+    try {
+      if (!pgClient) { await connectPg(); console.log('[pg] 心跳重建连接成功'); }
+      else await pgClient.query('SELECT 1');
+    } catch (e) {
+      lastPgError = 'heartbeat: ' + e.message;
+      console.error('[pg] 心跳失败，标记连接待重建：' + e.message);
+      if (pgClient) { try { await pgClient.end(); } catch (_) {} }
+      pgClient = null;
+    }
+  }, 4 * 60 * 1000);
+  if (_pgHeartbeat.unref) _pgHeartbeat.unref();
 
   app.listen(PORT, () => {
     console.log(`HR Workbench server running on http://localhost:${PORT} (store: ${usePg ? 'postgres' : 'file'})`);

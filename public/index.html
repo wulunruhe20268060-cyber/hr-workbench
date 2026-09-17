@@ -755,6 +755,11 @@ async function api(path, options = {}) {
       try { data = JSON.parse(text); }
       catch(e) { throw new Error('返回数据格式错误'); }
       if (data && data.error) throw new Error(data.error);
+      // 服务端在「数据库写入失败」时会给响应打 _persisted:false（数据只在内存、重启会回退），
+      // 这里明确提示用户，避免"看着保存成功、刷新后记录没了"（2026-09-17）。
+      if (data && data._persisted === false) {
+        showToast('⚠️ 操作已提交，但数据未能写入数据库，请稍后重试或联系管理员', 4500);
+      }
       return data;
     } catch(e) {
       lastError = e;
@@ -2832,7 +2837,18 @@ async function saveCheckin(hireId, periodId, qCount) {
     await apiPost('/api/hires/' + hireId + '/periods/' + periodId + '/checkins', {
       date, answers, feedback, notes
     });
-    closeModal(); await render(); showToast('随访记录已添加');
+    closeModal(); await render();
+    // 复核（2026-09-17 新增）：从服务端重新拉一次，确认这条随访记录真的存下来了，
+    // 避免"提示保存成功、刷新后却没了"（数据库写入失败时后端只写到了临时文件）。
+    let saved = false;
+    try {
+      const fresh = await apiGet('/api/hires');
+      const h2 = (fresh || []).find(x => x.id === hireId);
+      const p2 = (h2 && (h2.periods || []).find(p => p.id === periodId)) || null;
+      saved = !!(p2 && (p2.checkins || []).some(c => c.date === date && (c.feedback || '') === feedback && (c.notes || '') === notes));
+    } catch (e) { saved = true; } // 复核请求失败时不误报
+    if (saved) showToast('随访记录已添加');
+    else showToast('⚠️ 未在服务端确认到该随访记录，请刷新后重试', 4500);
   } catch(e) { showToast(e.message); }
 }
 
@@ -2875,6 +2891,14 @@ async function batchImportCheckins(hireId, periodId) {
 async function doBatchImportCheckins(hireId, periodId, qCount) {
   const text = document.getElementById('batch_ck_text').value.trim();
   if (!text) { showToast('请粘贴内容'); return; }
+  // 导入前记录条数，导入后与服务端核对实际新增（2026-09-17）
+  let beforeCount = null;
+  try {
+    const hs0 = await apiGet('/api/hires');
+    const h0 = (hs0 || []).find(x => x.id === hireId);
+    const p0 = (h0 && (h0.periods || []).find(p => p.id === periodId)) || null;
+    beforeCount = p0 ? (p0.checkins || []).length : null;
+  } catch (e) {}
   const lines = text.split('\n').filter(l => l.trim());
   let count = 0, errors = 0;
   for (const line of lines) {
@@ -2894,7 +2918,18 @@ async function doBatchImportCheckins(hireId, periodId, qCount) {
       count++;
     } catch(e) { errors++; }
   }
-  closeModal(); await render(); showToast('成功导入 ' + count + ' 条' + (errors > 0 ? '，失败 ' + errors + ' 条' : ''));
+  closeModal(); await render();
+  // 与服务端核对实际新增条数（防止"显示导入成功但没落库"）
+  let realAdded = null;
+  try {
+    const fresh = await apiGet('/api/hires');
+    const h2 = (fresh || []).find(x => x.id === hireId);
+    const p2 = (h2 && (h2.periods || []).find(p => p.id === periodId)) || null;
+    if (p2 && beforeCount !== null) realAdded = (p2.checkins || []).length - beforeCount;
+  } catch (e) {}
+  const mismatch = (realAdded !== null && realAdded !== count);
+  showToast('成功导入 ' + count + ' 条' + (errors > 0 ? '，失败 ' + errors + ' 条' : '')
+    + (mismatch ? `（服务端实际新增 ${realAdded} 条，请刷新核对）` : ''), mismatch ? 5000 : 2500);
 }
 
 // Auto-inject "批量导入" button next to "+随访"
