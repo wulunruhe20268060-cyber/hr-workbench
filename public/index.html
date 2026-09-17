@@ -1328,18 +1328,22 @@ async function renderBoard(positions, boardHistory, interviews, progress) {
 
   // 顶部英雄带已覆盖全局 KPI，岗位列表卡片不再重复展示漏斗带（2026-09-17 应需求移除）；
   // 操作按钮（新增岗位/批量编辑/上传表格）合并到「岗位详情」卡片头部，避免出现空卡片
-  const boardActions = `<div style="display:flex;gap:8px;flex-wrap:wrap">
+  const boardActions = `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         ${canEdit ? `<button class="btn btn-primary btn-sm" onclick="showAddPosition()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>新增岗位</button>` : ''}
         ${canEdit && positions.length > 0 ? `<button class="btn btn-warning btn-sm" onclick="toggleBatchEdit()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>批量编辑</button>` : ''}
         ${canEdit && positions.length > 0 ? `<button class="btn btn-success btn-sm" id="batchSaveBtn" onclick="saveBatchEdit()" style="display:none">保存批量修改</button>` : ''}
+        ${canEdit ? `<button class="btn btn-outline btn-sm" onclick="syncBoardFromProgress()" title="按当前招聘进度模块的岗位/部门/需求，手动同步到招聘看板岗位详情（与自动同步并存）">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>从招聘进度同步</button>` : ''}
         ${canEdit ? `<button class="btn btn-success btn-sm" onclick="document.getElementById('positionUpload').click()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>上传表格
         </button><input type="file" id="positionUpload" accept=".csv,.txt,.xlsx,.xls" style="display:none" onchange="handlePositionUpload(event)">` : ''}
       </div>`;
 
   html += `<div class="card"><div class="card-header"><h2>岗位详情</h2>${boardActions}</div>`;
+  // 年月时间：与招聘进度模块的年月保持一致（招聘进度月份驱动看板所有月份相关统计）
+  html += `<div style="padding:0 16px 8px;font-size:13px;color:var(--text2)">📅 招聘进度月份：<strong style="color:var(--primary)">${bMonth.slice(0,4)} 年 ${parseInt(bMonth.slice(5),10)} 月</strong><span style="margin-left:8px;color:var(--text3)">（与招聘进度模块同步）</span></div>`;
   html += `<div class="search-filter-bar" style="flex-wrap:nowrap;gap:10px">
     <input class="search-input" id="posSearch" style="flex:2 1 0;min-width:0" placeholder="搜索岗位 / 部门" oninput="filterPositions()">
     <select class="filter-select" id="posFlow" style="flex:1 1 0;min-width:0" onchange="filterPositions()">
@@ -1385,9 +1389,11 @@ async function renderBoard(positions, boardHistory, interviews, progress) {
   html += `</div>`;
 
   // ===== 历史看板（每月1号自动归档上月快照，可手动归档/回溯/删除重存）=====
+  // 默认折叠状态，点击卡片标题或「展开」按钮单独展开查看（2026-09-17 应需求改为默认折叠）
   const hist = boardHistoryCache;
-  html += `<div class="card"><div class="card-header"><h2>历史看板</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+  html += `<div class="card" id="histCard"><div class="card-header" style="cursor:pointer" onclick="toggleBoardHistory()">
+      <h2>历史看板 <span id="histToggle" style="font-size:12px;color:var(--text2);font-weight:normal">${hist.length ? '▸ 点击展开' : '（暂无归档）'}</span></h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap" onclick="event.stopPropagation()">
         ${canEdit ? `<button class="btn btn-warning btn-sm" onclick="archiveBoard()">归档上月</button>` : ''}
         ${hist.length > 0 ? `<select id="histMonth" onchange="renderBoardHistory(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">
           ${hist.map(h => `<option value="${h.month}">${h.month} 归档</option>`).join('')}
@@ -1395,12 +1401,22 @@ async function renderBoard(positions, boardHistory, interviews, progress) {
         ${canEdit && hist.length > 0 ? `<button class="btn btn-danger btn-sm" onclick="deleteBoardArchive()">删除当前月份归档</button>` : ''}
       </div>
     </div>
-    <div id="boardHistoryDetail">${hist.length ? '<div style="text-align:center;color:var(--text2);padding:14px">请选择月份查看归档快照</div>' : `<div style="text-align:center;color:var(--text2);padding:14px">暂无历史归档。每月 1 号系统会自动归档上个月的看板；管理员也可点「归档上月」立即保存。</div>`}</div>
+    <div id="boardHistoryDetail" style="display:none">${hist.length ? '<div style="text-align:center;color:var(--text2);padding:14px">请选择月份查看归档快照</div>' : `<div style="text-align:center;color:var(--text2);padding:14px">暂无历史归档。每月 1 号系统会自动归档上个月的看板；管理员也可点「归档上月」立即保存。</div>`}</div>
   </div>`;
 
   document.getElementById('moduleContent').innerHTML = html;
-  if (hist.length) {
-    // 默认选中最近一次归档并展示
+  // 默认折叠，不自动展开（用户需点击展开）
+}
+
+// 历史看板展开/收起：仅展开时渲染明细，避免占用页面空间
+function toggleBoardHistory() {
+  const detail = document.getElementById('boardHistoryDetail');
+  const toggle = document.getElementById('histToggle');
+  if (!detail) return;
+  const willShow = detail.style.display === 'none';
+  detail.style.display = willShow ? 'block' : 'none';
+  if (toggle) toggle.textContent = willShow ? '▾ 点击收起' : '▸ 点击展开';
+  if (willShow) {
     const sel = document.getElementById('histMonth');
     if (sel) renderBoardHistory(sel.value);
   }
@@ -1412,6 +1428,15 @@ async function archiveBoard() {
     showToast(r.existed ? `${r.month} 已有归档，未重复保存` : `${r.month} 看板已归档（${r.positions||0} 个岗位）`);
     await render();
   } catch(e) { showToast(e.message); }
+}
+// 手动同步：把当前招聘进度月份的岗位/部门/需求，推送到招聘看板岗位详情（与自动同步并存）
+async function syncBoardFromProgress() {
+  if (!isAdmin()) { showToast('仅管理员可操作'); return; }
+  try {
+    const r = await apiPost('/api/board/sync-from-progress', { month: progressMonthStr() });
+    await render();
+    showToast(`已从招聘进度同步 ${r.month||progressMonthStr()}：${r.added} 个新建、${r.updated} 个更新`);
+  } catch(e) { showToast('同步失败：' + e.message); }
 }
 async function deleteBoardArchive() {
   const sel = document.getElementById('histMonth');
@@ -1427,6 +1452,10 @@ async function deleteBoardArchive() {
 function renderBoardHistory(month) {
   const wrap = document.getElementById('boardHistoryDetail');
   if (!wrap) return;
+  // 选择月份时确保面板已展开（历史看板默认折叠）
+  wrap.style.display = 'block';
+  const tg = document.getElementById('histToggle');
+  if (tg) tg.textContent = '▾ 点击收起';
   const h = boardHistoryCache.find(x => x.month === month);
   if (!h) { wrap.innerHTML = '<div style="text-align:center;color:var(--text2);padding:14px">该月份无归档数据</div>'; return; }
   const snap = h.snapshot || [];
@@ -3014,7 +3043,7 @@ function renderProgress(progress) {
   
   html += `<div style="overflow-x:auto"><table class="progress-table">
     <tr>
-      <th style="width:100px">岗位</th><th style="width:50px">指标</th>
+      <th style="width:100px">岗位</th><th style="width:50px">指标</th><th style="width:90px">部门</th>
       <th style="width:45px">优先</th><th style="width:45px">紧急</th><th style="width:45px">难度</th>
       <th style="width:180px">进度节点</th>
       <th style="width:50px">第1周</th><th style="width:50px">第2周</th><th style="width:50px">第3周</th><th style="width:50px">第4周</th>
@@ -3027,6 +3056,7 @@ function renderProgress(progress) {
     html += `<tr id="prog-row-${p.id}">
       <td class="row-position"><input value="${escapeHtml(p.position)}" onchange="markDirty('${p.id}','position',this.value)"></td>
       <td><input type="number" value="${p.headcount||0}" min="0" style="width:40px" onchange="markDirty('${p.id}','headcount',parseInt(this.value)||0)"></td>
+      <td class="row-dept"><input value="${escapeHtml(p.dept||'')}" onchange="markDirty('${p.id}','dept',this.value)" placeholder="部门"></td>
       <td><select onchange="markDirty('${p.id}','priority',this.value)"><option value="高" ${p.priority==='高'?'selected':''}>高</option><option value="中" ${p.priority==='中'?'selected':''}>中</option><option value="低" ${p.priority==='低'?'selected':''}>低</option></select></td>
       <td><select onchange="markDirty('${p.id}','urgency',this.value)"><option value="高" ${p.urgency==='高'?'selected':''}>高</option><option value="中" ${p.urgency==='中'?'selected':''}>中</option><option value="低" ${p.urgency==='低'?'selected':''}>低</option></select></td>
       <td><select onchange="markDirty('${p.id}','difficulty',this.value)"><option value="高" ${p.difficulty==='高'?'selected':''}>高</option><option value="中" ${p.difficulty==='中'?'selected':''}>中</option><option value="低" ${p.difficulty==='低'?'selected':''}>低</option></select></td>
@@ -3216,26 +3246,52 @@ async function parseUploadedSpreadsheet(file) {
   return result;
 }
 
+// 招聘进度上传：全面映射表格所有列（中/英表头都识别），只取文件中实际出现的字段，
+// 缺失的列不会写成 0（避免把没填的列误覆盖成 0）。支持 部门/总入职/缺编/完成率/流失 等全部字段。
+function mapProgressRow(r) {
+  const get = (...keys) => {
+    for (const k of keys) {
+      if (r[k] !== undefined && String(r[k]).trim() !== '') return String(r[k]).trim();
+    }
+    return undefined;
+  };
+  const num = (...keys) => {
+    const v = get(...keys);
+    if (v === undefined) return undefined;
+    const n = parseInt(v, 10);
+    return isNaN(n) ? 0 : n;
+  };
+  const position = get('岗位', 'position');
+  if (position === undefined) return null;
+  const item = { position };
+  const setIf = (field, ...keys) => { const v = get(...keys); if (v !== undefined) item[field] = v; };
+  const setNumIf = (field, ...keys) => { const v = num(...keys); if (v !== undefined) item[field] = v; };
+  setIf('dept', '部门', 'dept');
+  setNumIf('headcount', '指标', '需求人数', '需求', 'headcount');
+  setIf('priority', '优先', 'priority');
+  setIf('urgency', '紧急', 'urgency');
+  setIf('difficulty', '难度', 'difficulty');
+  setIf('milestone', '进度节点', 'milestone', 'planNode');
+  setNumIf('week1', '第1周', '周1', 'week1');
+  setNumIf('week2', '第2周', '周2', 'week2');
+  setNumIf('week3', '第3周', '周3', 'week3');
+  setNumIf('week4', '第4周', '周4', 'week4');
+  setNumIf('totalEntry', '总入职', '入职合计', 'totalEntry');
+  setNumIf('shortage', '缺编', 'shortage');
+  setIf('completion', '完成率', 'completion');
+  setNumIf('attrition', '流失', '离职', 'attrition');
+  setIf('note', '说明', 'note', 'notes');
+  return item;
+}
+
 async function handleProgressUpload(event) {
   const file = event.target.files[0];
   if (!file) return;
   const rows = await parseUploadedSpreadsheet(file);
   if (rows.length === 0) { showToast('未解析到有效数据，请确认文件包含表头行和数据行'); return; }
   
-  // Map CSV columns to progress fields
-  const items = rows.map(r => ({
-    position: r['岗位'] || r['position'] || '',
-    headcount: r['指标'] || r['headcount'] || r['需求人数'] || '1',
-    priority: r['优先'] || r['priority'] || '中',
-    urgency: r['紧急'] || r['urgency'] || '中',
-    difficulty: r['难度'] || r['difficulty'] || '中',
-    milestone: r['进度节点'] || r['milestone'] || r['planNode'] || '',
-    week1: r['第1周'] || r['week1'] || '0',
-    week2: r['第2周'] || r['week2'] || '0',
-    week3: r['第3周'] || r['week3'] || '0',
-    week4: r['第4周'] || r['week4'] || '0',
-    note: r['说明'] || r['note'] || r['notes'] || ''
-  })).filter(x => x.position);
+  // 全面映射：只取文件中实际出现的列（中/英表头均可），缺失列不覆盖
+  const items = rows.map(mapProgressRow).filter(x => x && x.position);
   
   if (items.length === 0) {
     // Show detected headers to help user debug

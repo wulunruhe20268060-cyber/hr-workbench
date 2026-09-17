@@ -1942,41 +1942,84 @@ app.delete('/api/progress/:id', authMiddleware, adminOnly, (req, res) => {
 
 // Batch import progress from CSV/array
 app.post('/api/progress/batch-import', authMiddleware, (req, res) => {
-  const { items, month } = req.body;
+  const { month } = req.body;
+  let items = req.body.items;
   const target = month || curMonthStr();
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: '请提供数据数组' });
   }
   let added = 0, updated = 0;
+  // 兼容中文表头直接调用接口：把常见中文 key 归一为英文字段（前端 mapProgressRow 已完成映射，这里是后端兜底）
+  const CN2EN = {
+    '岗位': 'position', '部门': 'dept', '指标': 'headcount', '需求人数': 'headcount', '需求': 'headcount',
+    '优先': 'priority', '紧急': 'urgency', '难度': 'difficulty', '进度节点': 'milestone', 'planNode': 'milestone',
+    '第1周': 'week1', '第2周': 'week2', '第3周': 'week3', '第4周': 'week4',
+    '周1': 'week1', '周2': 'week2', '周3': 'week3', '周4': 'week4',
+    '总入职': 'totalEntry', '入职合计': 'totalEntry', '缺编': 'shortage',
+    '完成率': 'completion', '流失': 'attrition', '离职': 'attrition',
+    '说明': 'note', 'notes': 'note'
+  };
+  const normalizeItem = (it) => {
+    const out = {};
+    Object.keys(it || {}).forEach(k => {
+      const ek = CN2EN[k] || k;
+      if (ek === 'position' && !it[k]) return;
+      out[ek] = it[k];
+    });
+    return out;
+  };
+  items = items.map(normalizeItem);
   items.forEach(item => {
     if (!item.position) return;
     // 上传/导入只作用于指定月份(默认当月)的进度行，不触碰其他月份数据
     const existing = db.progress.find(p => p.position === item.position && p.month === target);
+    // 哪些字段在上传表格中实际出现（缺失列不覆盖、不写成 0）
+    const providedWeeks = ['week1', 'week2', 'week3', 'week4'].some(k => item[k] !== undefined);
+    const providedTotal = item.totalEntry !== undefined;
     if (existing) {
-      // Update existing
-      if (item.headcount !== undefined) existing.headcount = parseInt(item.headcount) || existing.headcount;
+      // Update existing —— 只覆盖表格中出现的字段
+      if (item.dept !== undefined) existing.dept = item.dept;
+      if (item.headcount !== undefined) existing.headcount = parseInt(item.headcount) || 0;
       if (item.priority !== undefined) existing.priority = item.priority;
       if (item.urgency !== undefined) existing.urgency = item.urgency;
       if (item.difficulty !== undefined) existing.difficulty = item.difficulty;
       if (item.milestone !== undefined) existing.milestone = item.milestone;
-      if (item.week1 !== undefined) existing.week1 = parseInt(item.week1) || 0;
-      if (item.week2 !== undefined) existing.week2 = parseInt(item.week2) || 0;
-      if (item.week3 !== undefined) existing.week3 = parseInt(item.week3) || 0;
-      if (item.week4 !== undefined) existing.week4 = parseInt(item.week4) || 0;
       if (item.note !== undefined) existing.note = item.note;
-      // Recalculate
-      existing.totalEntry = (existing.week1||0) + (existing.week2||0) + (existing.week3||0) + (existing.week4||0);
-      existing.shortage = Math.max(0, (existing.headcount||0) - existing.totalEntry);
-      existing.completion = existing.headcount > 0 ? Math.round(existing.totalEntry / existing.headcount * 100) + '%' : '0%';
+      if (item.attrition !== undefined) existing.attrition = parseInt(item.attrition) || 0;
+      // 总入职：优先用表格给的「总入职」；否则由周次累加；否则保持不变
+      if (providedWeeks) {
+        existing.week1 = parseInt(item.week1) || 0;
+        existing.week2 = parseInt(item.week2) || 0;
+        existing.week3 = parseInt(item.week3) || 0;
+        existing.week4 = parseInt(item.week4) || 0;
+        existing.totalEntry = existing.week1 + existing.week2 + existing.week3 + existing.week4;
+      } else if (providedTotal) {
+        existing.totalEntry = parseInt(item.totalEntry) || 0;
+      }
+      if (providedWeeks || providedTotal) {
+        existing.shortage = Math.max(0, (existing.headcount || 0) - existing.totalEntry);
+        existing.completion = existing.headcount > 0 ? Math.round(existing.totalEntry / existing.headcount * 100) + '%' : '0%';
+      } else if (item.shortage !== undefined) {
+        existing.shortage = parseInt(item.shortage) || 0;
+        const denom = existing.headcount > 0 ? existing.headcount : (existing.totalEntry + existing.shortage) || 1;
+        existing.completion = Math.round((denom - existing.shortage) / denom * 100) + '%';
+      }
+      if (item.completion !== undefined) existing.completion = item.completion;
       updated++;
     } else {
       // Create new
-      const headcount = parseInt(item.headcount) || 1;
-      const w1 = parseInt(item.week1) || 0;
-      const w2 = parseInt(item.week2) || 0;
-      const w3 = parseInt(item.week3) || 0;
-      const w4 = parseInt(item.week4) || 0;
-      const totalEntry = w1 + w2 + w3 + w4;
+      const headcount = item.headcount !== undefined ? (parseInt(item.headcount) || 0) : 1;
+      let w1 = 0, w2 = 0, w3 = 0, w4 = 0, totalEntry = 0;
+      if (providedWeeks) {
+        w1 = parseInt(item.week1) || 0; w2 = parseInt(item.week2) || 0;
+        w3 = parseInt(item.week3) || 0; w4 = parseInt(item.week4) || 0;
+        totalEntry = w1 + w2 + w3 + w4;
+      } else if (providedTotal) {
+        totalEntry = parseInt(item.totalEntry) || 0;
+      }
+      const shortage = item.shortage !== undefined ? (parseInt(item.shortage) || 0) : Math.max(0, headcount - totalEntry);
+      const completion = item.completion !== undefined ? item.completion
+        : (headcount > 0 ? Math.round(totalEntry / headcount * 100) + '%' : '0%');
       db.progress.push({
         id: genId(),
         position: item.position,
@@ -1986,10 +2029,12 @@ app.post('/api/progress/batch-import', authMiddleware, (req, res) => {
         urgency: item.urgency || '中',
         difficulty: item.difficulty || '中',
         milestone: item.milestone || '',
+        dept: item.dept || '',
         week1: w1, week2: w2, week3: w3, week4: w4,
         totalEntry,
-        shortage: Math.max(0, headcount - totalEntry),
-        completion: headcount > 0 ? Math.round(totalEntry / headcount * 100) + '%' : '0%',
+        shortage,
+        completion,
+        attrition: item.attrition !== undefined ? (parseInt(item.attrition) || 0) : 0,
         note: item.note || '',
         createdBy: req.userId,
         createdAt: new Date().toISOString().split('T')[0]
@@ -2001,6 +2046,7 @@ app.post('/api/progress/batch-import', authMiddleware, (req, res) => {
       const posRow = db.positions.find(p => p.position === item.position);
       if (posRow) {
         posRow.dept = item.dept;
+        if (item.headcount !== undefined) posRow.headcount = parseInt(item.headcount) || 0;
       } else {
         const hc = parseInt(item.headcount) || 0;
         db.positions.unshift({
@@ -2014,6 +2060,34 @@ app.post('/api/progress/batch-import', authMiddleware, (req, res) => {
   });
   saveDb();
   res.json({ ok: true, added, updated, total: added + updated });
+});
+
+// 手动同步：将指定月份（默认当月）招聘进度行的岗位/部门/需求，推送到招聘看板 positions。
+// 与「保存进度时自动同步」并存——本接口用于把进度模块作为唯一源头、强制把看板岗位详情刷成进度值
+// （新建缺失岗位、更新部门/需求、按进度岗位名重命名为新名）。
+app.post('/api/board/sync-from-progress', authMiddleware, adminOnly, (req, res) => {
+  const month = (req.body && req.body.month) || curMonthStr();
+  const rows = (db.progress || []).filter(p => p.month === month);
+  let added = 0, updated = 0, renamed = 0;
+  const today = new Date().toISOString().split('T')[0];
+  rows.forEach(prog => {
+    if (!prog.position) return;
+    let pos = db.positions.find(x => x.position === prog.position);
+    if (!pos) {
+      db.positions.unshift({
+        id: genId(), position: prog.position, dept: prog.dept || '',
+        headcount: prog.headcount || 0, deadline: '',
+        stages: { resumeScreen: 0, firstInterview: 0, secondInterview: 0, finalInterview: 0, offer: 0, onboard: 0 },
+        status: 'active', createdBy: 'progress', createdAt: today
+      });
+      added++;
+    } else {
+      if (prog.dept && pos.dept !== prog.dept) { pos.dept = prog.dept; updated++; }
+      if (prog.headcount !== undefined && pos.headcount !== prog.headcount) { pos.headcount = prog.headcount; updated++; }
+    }
+  });
+  saveDb();
+  res.json({ ok: true, month, added, updated, renamed, total: rows.length });
 });
 
 // ========== LocalStorage Migration ==========
