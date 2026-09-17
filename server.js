@@ -1940,6 +1940,17 @@ app.delete('/api/progress/:id', authMiddleware, adminOnly, (req, res) => {
   res.json({ ok: true });
 });
 
+// 招聘进度：勾选批量删除（仅管理员）。按 id 数组删除进度行，返回实际删除条数。
+app.post('/api/progress/batch-delete', authMiddleware, adminOnly, (req, res) => {
+  const ids = (req.body && Array.isArray(req.body.ids)) ? req.body.ids : [];
+  if (ids.length === 0) return res.status(400).json({ error: '请先勾选要删除的招聘岗位' });
+  const before = (db.progress || []).length;
+  db.progress = (db.progress || []).filter(p => !ids.includes(p.id));
+  const removed = before - db.progress.length;
+  saveDb();
+  res.json({ ok: true, removed });
+});
+
 // Batch import progress from CSV/array
 app.post('/api/progress/batch-import', authMiddleware, (req, res) => {
   const { month } = req.body;
