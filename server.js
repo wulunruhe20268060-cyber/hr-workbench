@@ -1852,15 +1852,32 @@ function archiveBoardSnapshot(month, opts) {
   if (existed >= 0 && overwrite) {
     db.boardHistory.splice(existed, 1); // 删除旧版本
   }
+  // 归档行集合与「岗位详情」保持一致：看板岗位表 ∪ 当月招聘进度行 ∪ 当月面试同步快照中有数据的岗位。
+  // （否则历史看板会漏掉当月只出现在进度/面试里的岗位，导致归档合计小于同步提示，2026-09-17 修正）
+  const list = (db.positions || []).slice();
+  const listed = new Set(list.map(p => p.position));
+  (db.progress || []).filter(pr => pr && pr.month === month && pr.position).forEach(pr => {
+    if (listed.has(pr.position)) return;
+    listed.add(pr.position);
+    list.push({ position: pr.position, dept: pr.dept || '', headcount: pr.headcount || 0, status: 'active', stages: {} });
+  });
+  const monthSnap = (db.boardMonthlyStats || {})[month] || {};
+  Object.keys(monthSnap).forEach(n => {
+    const v = monthSnap[n] || {};
+    if ((v.resume || 0) <= 0 && (v.firstIv || 0) <= 0) return;
+    if (listed.has(n)) return;
+    listed.add(n);
+    list.push({ position: n, dept: '', headcount: 0, status: 'active', stages: {} });
+  });
   db.boardHistory.unshift({
     id: genId(), month,
     archivedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
-    snapshot: boardSnapshotOf(db.positions, month, (db.progress || []).filter(p => p.month === month)),
+    snapshot: boardSnapshotOf(list, month, (db.progress || []).filter(p => p.month === month)),
     summary: monthMetrics(month),
     overwritten: overwrite
   });
   saveDb();
-  return { archived: true, existed: false, month, positions: db.positions.length, overwritten: overwrite };
+  return { archived: true, existed: false, month, positions: list.length, overwritten: overwrite };
 }
 // 每月1号启动时归档上个月的看板结果
 function maybeAutoArchiveBoard() {
@@ -2214,14 +2231,26 @@ app.post('/api/board/sync-from-interviews', authMiddleware, adminOnly, (req, res
     if (advanced) byPos[iv.position].firstIv++;
   });
 
+  // 1b) 同月入职：按第二个日期（入职时间）统计在岗人数，作为「本月入职」在没有招聘进度行时的兜底
+  db.interviews.forEach(iv => {
+    if (!iv || !iv.position) return;
+    const sid = (iv.secondInterviewDate || '').toString().trim();
+    if (!sid) return;
+    if (monthOfDate(sid) !== month) return;
+    if (!isOnboarded(iv)) return;
+    if (!byPos[iv.position]) byPos[iv.position] = { resume: 0, firstIv: 0, onboardMonth: 0, candidateIds: new Set() };
+    byPos[iv.position].onboardMonth = (byPos[iv.position].onboardMonth || 0) + 1;
+  });
+
   // 2) 写入月度快照
   let synced = 0, totalResume = 0, totalFirstIv = 0;
   const posNames = new Set([...Object.keys(byPos), ...db.positions.map(p => p.position)]);
   posNames.forEach(posName => {
-    const st = byPos[posName] || { resume: 0, firstIv: 0 };
+    const st = byPos[posName] || { resume: 0, firstIv: 0, onboardMonth: 0 };
     db.boardMonthlyStats[month][posName] = {
       resume: st.resume,
       firstIv: st.firstIv,
+      onboardMonth: st.onboardMonth || 0,
       candidates: st.candidateIds ? st.candidateIds.size : 0,
       syncedAt: new Date().toISOString().slice(0, 19).replace('T', ' ')
     };
@@ -2230,12 +2259,18 @@ app.post('/api/board/sync-from-interviews', authMiddleware, adminOnly, (req, res
     if (st.resume || st.firstIv) synced++;
   });
   saveDb();
+  // 不在招聘看板岗位表、但当月有面试数据的岗位：前端会以「面试同步」附加行展示，避免汇总数与看板数不一致
+  const boardNames = new Set((db.positions || []).map(p => p.position));
+  const extraPositions = Object.entries(db.boardMonthlyStats[month])
+    .filter(([k, v]) => !boardNames.has(k) && ((v.resume || 0) > 0 || (v.firstIv || 0) > 0))
+    .map(([k]) => k);
   res.json({
     ok: true, month,
     syncedPositions: synced,
     totalResume, totalFirstIv,
+    extraPositions,
     detail: Object.fromEntries(Object.entries(db.boardMonthlyStats[month]).map(
-      ([k, v]) => [k, { resume: v.resume, firstIv: v.firstIv, candidates: v.candidates }]
+      ([k, v]) => [k, { resume: v.resume, firstIv: v.firstIv, onboardMonth: v.onboardMonth || 0, candidates: v.candidates }]
     ))
   });
 });

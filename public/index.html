@@ -328,6 +328,11 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 /* Table */
 .pos-table,.interview-table{width:100%;border-collapse:collapse}
 .pos-table tr:hover,.interview-table tr:hover{background:#F5F7FA}
+/* 岗位详情「面试同步」附加行：该岗位不在看板岗位表中（多出现在历史月份），数据来自面试管理同步快照 */
+.pos-table tr.row-virtual td{background:#FBFCFE;color:#5A6C8C}
+.pos-table tr.row-virtual:hover td{background:#F1F6FF}
+.virtual-tag{display:inline-block;margin-left:4px;padding:1px 5px;border-radius:4px;background:#EAF2FF;color:#2E6BE6;font-size:10px;font-weight:600;vertical-align:middle;white-space:nowrap}
+.virtual-tag.tag-prog{background:#FFF3E0;color:#C77700}
 /* 合同台账「签订单位」列：多单位简称垂直堆叠、CJK 之间不强制拆行（用户口述会控制 ≤5 字，不再做硬截行） */
 .sign-unit-block{line-height:1.4;color:var(--text);word-break:keep-all;overflow-wrap:break-word}
 .sign-unit-block-sep{margin-top:4px;padding-top:4px;border-top:1px dashed #DCE6F5}
@@ -1288,7 +1293,7 @@ let boardHistoryCache = [];
 function boardStat(posName, interviews, month) {
   const progressCur = window._progressCur || {};
   const boardOnboardMap = window._boardOnboardMap || {};
-  const boardMonthly = window._boardMonthly || {}; // 月度快照：{ "YYYY-MM": { posName: { resume, firstIv } } }
+  const boardMonthly = window._boardMonthly || {}; // 月度快照：{ "YYYY-MM": { posName: { resume, firstIv, onboardMonth } } }
   month = month || progressMonthStr();
   let resume = 0, firstIv = 0;
   // 简历/初面：优先读月度快照（与「从面试管理同步」按钮配合），无快照则实时统计面试表
@@ -1306,14 +1311,15 @@ function boardStat(posName, interviews, month) {
     });
   }
   // 岗位/部门/本月入职：来自招聘进度模块当月行
-  const prog = progressCur[posName] || {};
-  const obMonth = prog.totalEntry || 0;            // 本月入职 ← 招聘进度当月入职合计
+  const prog = progressCur[posName];
+  // 本月入职 ← 招聘进度当月入职合计（totalEntry）；该岗位没有进度行时，回退到月度快照里的面试表本月入职
+  const obMonth = prog ? (prog.totalEntry || 0) : ((snap && snap.onboardMonth) || 0);
   // 本年入职：招聘看板该岗位累计已入职(在岗)人数（看板累加值）
   const obYear = boardOnboardMap[posName] || 0;
   return {
     resume, firstIv, obMonth, obYear,
-    dept: prog.dept || '',
-    headcount: prog.headcount || 0
+    dept: (prog && prog.dept) || '',
+    headcount: (prog && prog.headcount) || 0
   };
 }
 // 辅助：判断面试是否已被淘汰（与 isOnboarded 对偶）
@@ -1342,22 +1348,25 @@ async function renderBoard(positions, boardHistory, interviews, progress) {
   (positions || []).forEach(p => { window._boardOnboardMap[p.position] = (p.stages && p.stages.onboard) || 0; });
 
   const bMonth = progressMonthStr();
+  // 行集合（2026-09-17 修正）：月份维度的岗位详情 = 招聘进度当月行 ∪ 看板岗位表 ∪ 该月面试同步快照中有数据的岗位。
+  // 原因：面试表里的岗位名会随月份变化（如 6 月的「大数据开发/销售主管」），若只渲染看板岗位表，
+  // 「从面试管理同步」汇总到的简历/初面就会有一部分无处显示，导致同步提示的人数与看板合计不一致。
+  const posByName = {};
+  (positions || []).forEach(p => { if (p && p.position) posByName[p.position] = p; });
+  const snapMonth = (window._boardMonthly || {})[bMonth] || {};
+  const rowNames = [];
+  const _seenRow = new Set();
+  const addRow = n => { if (n && !_seenRow.has(n)) { _seenRow.add(n); rowNames.push(n); } };
+  (progress || []).forEach(p => { if (p && p.position) addRow(p.position); });      // 1) 招聘进度当月行（决定顺序）
+  (positions || []).forEach(p => { if (p && p.position) addRow(p.position); });    // 2) 看板岗位表
+  Object.keys(snapMonth).forEach(n => {                                            // 3) 面试同步快照里有数据的岗位
+    const v = snapMonth[n] || {};
+    if ((v.resume || 0) > 0 || (v.firstIv || 0) > 0) addRow(n);
+  });
+
   // 各岗位指标：岗位/部门/本月入职←招聘进度；简历/初面←面试管理；本年入职←招聘看板累加
   const boardStats = {};
-  positions.forEach(p => { boardStats[p.position] = boardStat(p.position, interviews, bMonth); });
-
-  // 按招聘进度当月行顺序排序岗位（用户需求：岗位详情顺序=招聘进度顺序）
-  // 招聘进度里没有的岗位排在最后（按 positions 原顺序）
-  const progressOrder = {};
-  (progress || []).forEach((p, i) => { if (p && p.position) progressOrder[p.position] = i; });
-  const sortedPositions = positions.slice().sort((a, b) => {
-    const ai = progressOrder[a.position];
-    const bi = progressOrder[b.position];
-    if (ai !== undefined && bi !== undefined) return ai - bi;
-    if (ai !== undefined) return -1;
-    if (bi !== undefined) return 1;
-    return 0;
-  });
+  rowNames.forEach(n => { boardStats[n] = boardStat(n, interviews, bMonth); });
 
   // 顶部英雄带已覆盖全局 KPI，岗位列表卡片不再重复展示漏斗带（2026-09-17 应需求移除）；
   // 操作按钮（新增岗位/批量编辑/上传表格）合并到「岗位详情」卡片头部，避免出现空卡片
@@ -1389,7 +1398,7 @@ async function renderBoard(positions, boardHistory, interviews, progress) {
     <button class="btn btn-primary btn-sm" style="flex:0 0 auto" onclick="filterPositions()">查询</button>
     <button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="resetPosFilter()">重置</button>
   </div>`;
-  if (positions.length===0) {
+  if (rowNames.length===0) {
     html += `<div style="text-align:center;color:var(--text2);padding:20px">暂无岗位${canEdit?'，点击上方按钮新增':''}</div>`;
   } else {
     if (canEdit) {
@@ -1401,31 +1410,36 @@ async function renderBoard(positions, boardHistory, interviews, progress) {
     }
     html += `<div style="overflow-x:auto"><table class="pos-table" id="posTable">
       <tr>${canEdit?'<th style="width:40px"><input type="checkbox" onchange="toggleAllRows(this)"></th>':''}<th>岗位</th><th>部门</th><th>需求</th><th>简历</th><th>初面</th><th>复试</th><th>Offer</th><th>本月入职</th><th>本年入职</th>${canEdit?'<th>操作</th>':''}</tr>`;
-    sortedPositions.forEach(p => {
-      const st = boardStats[p.position] || {resume:0,firstIv:0,obMonth:0,obYear:0,dept:'',headcount:0};
+    rowNames.forEach(name => {
+      const p = posByName[name] || null;   // 无对应看板岗位时 = 当月附加行（招聘进度 / 面试同步）
+      const st = boardStats[name] || {resume:0,firstIv:0,obMonth:0,obYear:0,dept:'',headcount:0};
       // 岗位/部门/本月入职 ← 招聘进度模块（随进度同步）；回退到看板自身字段
-      const dept = st.dept || p.dept || '';
-      const headcount = st.headcount || p.headcount || 1;
-      html += `<tr data-pid="${p.id}">
-        ${canEdit?`<td><input type="checkbox" class="row-checkbox" data-id="${p.id}" onchange="updateBatchDeleteBar()"></td>`:''}
-        <td><strong>${escapeHtml(p.position)}</strong></td>
-        <td>${escapeHtml(dept)}</td><td><input type="number" value="${headcount}" min="1" style="width:50px;text-align:center;padding:4px;border:1px solid transparent;border-radius:4px;font-size:13px;background:transparent" onchange="updatePositionHeadcount('${p.id}', parseInt(this.value)||1)" onfocus="this.style.borderColor='var(--primary)';this.style.background='#fff'" onblur="this.style.borderColor='transparent';this.style.background='transparent'" title="点击修改需求人数"></td>
+      const dept = st.dept || (p && p.dept) || '';
+      const headcount = st.headcount || (p && p.headcount) || 0;
+      // 附加行标记：来自招聘进度的标「招聘进度」，仅来自面试同步快照的标「面试同步」
+      const addTag = p ? '' : ((window._progressCur||{})[name]
+        ? ' <span class="virtual-tag tag-prog" title="该岗位出现在本月招聘进度中，但不在看板岗位表里（多为历史月份），已按进度行一并展示">招聘进度</span>'
+        : ' <span class="virtual-tag" title="该岗位不在招聘看板岗位表中，数据来自「从面试管理同步」的月度快照">面试同步</span>');
+      html += `<tr data-pid="${p?p.id:''}" data-pos="${escapeHtml(name)}"${p?'':' class="row-virtual"'}>
+        ${canEdit?(p?`<td><input type="checkbox" class="row-checkbox" data-id="${p.id}" onchange="updateBatchDeleteBar()"></td>`:'<td></td>'):''}
+        <td><strong>${escapeHtml(name)}</strong>${addTag}</td>
+        <td>${escapeHtml(dept)}</td><td>${p?`<input type="number" value="${headcount||1}" min="1" style="width:50px;text-align:center;padding:4px;border:1px solid transparent;border-radius:4px;font-size:13px;background:transparent" onchange="updatePositionHeadcount('${p.id}', parseInt(this.value)||1)" onfocus="this.style.borderColor='var(--primary)';this.style.background='#fff'" onblur="this.style.borderColor='transparent';this.style.background='transparent'" title="点击修改需求人数">`:`<span>${headcount||0}</span>`}</td>
         <td class="computed-cell">${st.resume}</td>
         <td class="computed-cell">${st.firstIv}</td>
-        <td class="batch-cell">${p.stages.secondInterview||0}</td>
-        <td class="batch-cell">${p.stages.offer||0}</td>
+        <td class="batch-cell">${p?((p.stages&&p.stages.secondInterview)||0):0}</td>
+        <td class="batch-cell">${p?((p.stages&&p.stages.offer)||0):0}</td>
         <td class="computed-cell"><strong style="color:var(--primary)">${st.obMonth}</strong></td>
         <td class="computed-cell"><strong style="color:var(--primary)">${st.obYear}</strong></td>
-        ${canEdit ? `<td class="action-cell"><button class="btn btn-outline btn-xs" onclick="editPosition('${p.id}')">编辑</button><button class="btn btn-danger btn-xs" onclick="deletePosition('${p.id}')">删除</button></td>` : ''}
+        ${canEdit ? `<td class="action-cell">${p?`<button class="btn btn-outline btn-xs" onclick="editPosition('${p.id}')">编辑</button><button class="btn btn-danger btn-xs" onclick="deletePosition('${p.id}')">删除</button>`:'<span style="color:var(--text2)">—</span>'}</td>` : ''}
       </tr>`;
     });
 
-    // 合计行（实时统计，不依赖招聘进度表；用户需求：进度表缺字段带不过来）
-    const totalHc = positions.reduce((s,p)=>s+(p.headcount||0),0);
+    // 合计行（按当前月份实际展示的行汇总，与「从面试管理同步」的汇总口径一致）
+    const totalHc = rowNames.reduce((s,n)=>s+((boardStats[n]&&boardStats[n].headcount)||(posByName[n]&&posByName[n].headcount)||0),0);
     const totalResume = Object.values(boardStats).reduce((s,st)=>s+(st.resume||0),0);
     const totalFirstIv = Object.values(boardStats).reduce((s,st)=>s+(st.firstIv||0),0);
-    const totalSecondIv = positions.reduce((s,p)=>s+((p.stages&&p.stages.secondInterview)||0),0);
-    const totalOffer = positions.reduce((s,p)=>s+((p.stages&&p.stages.offer)||0),0);
+    const totalSecondIv = rowNames.reduce((s,n)=>s+((posByName[n]&&posByName[n].stages&&posByName[n].stages.secondInterview)||0),0);
+    const totalOffer = rowNames.reduce((s,n)=>s+((posByName[n]&&posByName[n].stages&&posByName[n].stages.offer)||0),0);
     const totalObMonth = Object.values(boardStats).reduce((s,st)=>s+(st.obMonth||0),0);
     const totalObYear = Object.values(boardStats).reduce((s,st)=>s+(st.obYear||0),0);
     html += `<tr class="row-total">
@@ -1522,7 +1536,8 @@ async function syncBoardFromInterviews() {
   try {
     const r = await apiPost('/api/board/sync-from-interviews', { month });
     await render();
-    showToast(`已从面试管理同步 ${r.month||month}：${r.syncedPositions||0} 个岗位、简历 ${r.totalResume||0} 人、初面 ${r.totalFirstIv||0} 人`);
+    const extra = (r.extraPositions && r.extraPositions.length) ? `，其中 ${r.extraPositions.length} 个岗位不在看板岗位表、已作为附加行展示` : '';
+    showToast(`已从面试管理同步 ${r.month||month}：${r.syncedPositions||0} 个岗位、简历 ${r.totalResume||0} 人、初面 ${r.totalFirstIv||0} 人${extra}`);
   } catch(e) { showToast('同步失败：' + e.message); }
 }
 async function deleteBoardArchive() {
@@ -1658,8 +1673,9 @@ function toggleBatchEdit() {
   if (batchEditMode) {
     saveBtn.style.display = '';
     rows.forEach(row => {
-      const cells = row.querySelectorAll('.batch-cell');
       const pid = row.dataset.pid;
+      if (!pid) return; // 仅面试同步来的附加行：不可批量编辑
+      const cells = row.querySelectorAll('.batch-cell');
       cells.forEach((cell, i) => {
         const val = cell.textContent;
         cell.innerHTML = `<input type="number" class="batch-input" data-pid="${pid}" data-stage="${stageKeys[i]}" value="${val}" min="0" style="width:50px;text-align:center;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:13px">`;
@@ -4834,16 +4850,16 @@ function setVal(id, v) { const el = document.getElementById(id); if (el) el.valu
 function filterPositions() {
   const kw = (document.getElementById('posSearch')?.value || '').trim().toLowerCase();
   const flow = document.getElementById('posFlow')?.value || '';
-  const rows = document.querySelectorAll('#posTable tr[data-pid]');
+  const rows = document.querySelectorAll('#posTable tr[data-pos]');
   rows.forEach(tr => {
-    const p = (window._boardPositions || []).find(x => x.id === tr.dataset.pid);
-    if (!p) return;
+    const name = tr.dataset.pos || '';
+    const p = (window._boardPositions || []).find(x => x.position === name);
     const txt = tr.textContent.toLowerCase();
     let ok = !kw || txt.includes(kw);
     if (flow === 'gap' || flow === 'full') {
-      const _m = progressMonthStr(), _y = _m.slice(0,4);
-      const st = boardStat(p.position, window._interviewData || [], _m);
-      const hc = st.headcount || p.headcount || 1;
+      const _m = progressMonthStr();
+      const st = boardStat(name, window._interviewData || [], _m);
+      const hc = st.headcount || (p && p.headcount) || 1;
       if (flow === 'gap') ok = ok && st.obMonth < hc;
       if (flow === 'full') ok = ok && st.obMonth >= hc;
     }
