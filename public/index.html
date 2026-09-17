@@ -1546,23 +1546,43 @@ function renderBoardHistory(month) {
   const h = boardHistoryCache.find(x => x.month === month);
   if (!h) { wrap.innerHTML = '<div style="text-align:center;color:var(--text2);padding:14px">该月份无归档数据</div>'; return; }
   const snap = h.snapshot || [];
+  // 数据源：已归档的本月看板快照 h.snapshot（positions.stages + headcount），与实时统计脱钩
   const stageKeys = ['resumeScreen','firstInterview','secondInterview','offer','onboard'];
-  const stageLabels = ['简历筛选','初面','复试','Offer','入职'];
   const sum = {}; stageKeys.forEach(k => sum[k] = 0);
-  snap.forEach(p => stageKeys.forEach(k => sum[k] += (p.stages && p.stages[k]) || 0));
-  const total = stageKeys.reduce((a,k)=>a+sum[k],0);
+  sum.headcount = 0;
+  snap.forEach(p => {
+    sum.headcount += (p.headcount || 0);
+    const st = p.stages || {};
+    stageKeys.forEach(k => sum[k] += st[k] || 0);
+  });
+  // 完成率口径 = 入职人数 ÷ 需求人数 × 100%（与 KPI 英雄带口径一致）
+  const completionRate = sum.headcount > 0 ? Math.round(sum.onboard / sum.headcount * 100) : 0;
   if (snap.length === 0) { wrap.innerHTML = '<div style="text-align:center;color:var(--text2);padding:14px">该月归档无岗位数据</div>'; return; }
-  const histIcons = ['简','初','复','终','发','入'];
-  let t = `<div style="margin-bottom:10px;font-size:13px;color:var(--text2)">归档时间：${escapeHtml(h.archivedAt||'')} ｜ ${snap.length} 个岗位 ｜ 管道合计 ${total} 人</div>
-    <div class="board-columns">${stageLabels.map((lb,i)=>`<div class="board-col"><div class="board-col-icon">${histIcons[i]}</div><div class="board-col-body"><div class="board-col-count">${sum[stageKeys[i]]}</div><div class="board-col-label">${lb}</div></div></div>`).join('')}</div>
+  // KPI 卡片（5 张）：简历/初面/复试/完成率/入职 —— 第 4 张由 Offer 改为完成率（2026-09-17 应需求）
+  const histLabels = ['简历筛选','初面','复试','完成率','入职'];
+  const histIcons  = ['简','初','复','完','发'];
+  const histValues = [sum.resumeScreen, sum.firstInterview, sum.secondInterview, completionRate + '%', sum.onboard];
+  let t = `<div style="margin-bottom:10px;font-size:13px;color:var(--text2)">归档时间：${escapeHtml(h.archivedAt||'')} ｜ ${snap.length} 个岗位 ｜ 完成率 ${completionRate}%</div>
+    <div class="board-columns">${histLabels.map((lb,i)=>`<div class="board-col"><div class="board-col-icon">${histIcons[i]}</div><div class="board-col-body"><div class="board-col-count">${histValues[i]}</div><div class="board-col-label">${lb}</div></div></div>`).join('')}</div>
     <div style="overflow-x:auto;margin-top:10px"><table class="pos-table">
-      <tr><th>岗位</th><th>部门</th><th>需求</th><th>简历</th><th>初面</th><th>复试</th><th>Offer</th><th>入职</th></tr>`;
+      <tr><th>岗位</th><th>部门</th><th>需求</th><th>简历</th><th>初面</th><th>复试</th><th>Offer</th><th>入职</th><th>完成率</th></tr>`;
   snap.forEach(p => {
     const st = p.stages || {};
-    t += `<tr><td><strong>${escapeHtml(p.position)}</strong></td><td>${escapeHtml(p.dept||'')}</td><td>${p.headcount||0}</td>
+    const hc = p.headcount || 0;
+    const rate = hc > 0 ? Math.round((st.onboard || 0) / hc * 100) : 0;
+    t += `<tr><td><strong>${escapeHtml(p.position)}</strong></td><td>${escapeHtml(p.dept||'')}</td><td>${hc}</td>
       <td>${st.resumeScreen||0}</td><td>${st.firstInterview||0}</td><td>${st.secondInterview||0}</td><td>${st.offer||0}</td>
-      <td><strong style="color:var(--primary)">${st.onboard||0}</strong></td></tr>`;
+      <td><strong style="color:var(--primary)">${st.onboard||0}</strong></td>
+      <td><strong style="color:${rate>=100?'var(--success)':rate>0?'var(--primary)':'var(--text3)'}">${rate}%</strong></td></tr>`;
   });
+  // 合计行（最后一行）—— 2026-09-17 应需求新增
+  t += `<tr class="row-total">
+    <td><strong>合计</strong></td><td></td><td><strong>${sum.headcount}</strong></td>
+    <td><strong>${sum.resumeScreen}</strong></td><td><strong>${sum.firstInterview}</strong></td>
+    <td><strong>${sum.secondInterview}</strong></td><td><strong>${sum.offer}</strong></td>
+    <td><strong style="color:var(--primary)">${sum.onboard}</strong></td>
+    <td><strong style="color:${completionRate>=100?'var(--success)':'var(--primary)'}">${completionRate}%</strong></td>
+  </tr>`;
   t += `</table></div>`;
   wrap.innerHTML = t;
 }
