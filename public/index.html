@@ -1546,11 +1546,14 @@ function renderBoardHistory(month) {
   const h = boardHistoryCache.find(x => x.month === month);
   if (!h) { wrap.innerHTML = '<div style="text-align:center;color:var(--text2);padding:14px">该月份无归档数据</div>'; return; }
   const snap = h.snapshot || [];
-  // 兜底：若快照缺 monthlyStats（旧归档），按 month 实时遍历 window._interviewAllCache 补算
-  // _interviewAllCache 在 render() 时注入全量 interviews；缺失则空兜底=0
+  // 兜底：若快照缺 monthlyStats（旧归档），按 month 实时遍历 window._interviewAllCache / window._progressCurByMonth 补算
+  // _interviewAllCache 在 render() 时注入全量 interviews；_progressCurByMonth 在 render() 时按月份注入 progress.totalEntry（兜底用，与岗位详情口径统一）
   const ivCache = (typeof window !== 'undefined' && window._interviewAllCache) || [];
+  const progByMonth = (typeof window !== 'undefined' && window._progressCurByMonth) || {};
   const needFallback = snap.some(p => !p.monthlyStats);
   const fallbackByPos = {};
+  // fallback 入职列首选 = 招聘进度 totalEntry；缺则退到面试表 secondInterviewDate
+  const fallbackProgressByPos = (progByMonth[month] && progByMonth[month].byPos) || {};
   if (needFallback) {
     ivCache.forEach(iv => {
       if (!iv || !iv.position) return;
@@ -1565,7 +1568,7 @@ function renderBoardHistory(month) {
         const advanced = bIsOnboarded(iv) || bIvResultIn(iv, ['通过', '待复试', 'Offer', '已入职', '待入职']);
         if (advanced) fallbackByPos[iv.position].firstIv++;
       }
-      // 本月入职：按 secondInterviewDate 月份（2026-09-17 应需求：入职列改本月口径，含已离职不剔除）
+      // 本月入职（面试表，按 secondInterviewDate）—— 仅在月度快照完全没有且进度表也缺时用兜底
       if (iv.secondInterviewDate && bMonthOf(iv.secondInterviewDate) === month) {
         if (!fallbackByPos[iv.position]) fallbackByPos[iv.position] = { resume: 0, firstIv: 0, onboardMonth: 0 };
         fallbackByPos[iv.position].onboardMonth++;
@@ -1576,33 +1579,52 @@ function renderBoardHistory(month) {
   const stageKeys = ['resumeScreen','firstInterview','secondInterview','offer','onboard'];
   const sum = {}; stageKeys.forEach(k => sum[k] = 0);
   sum.headcount = 0;
-  sum.resume = 0; sum.firstIv = 0; sum.onboardMonth = 0;
+  sum.resume = 0; sum.firstIv = 0; sum.onboardMonth = 0; sum.progressTotal = 0;
   snap.forEach(p => {
     sum.headcount += (p.headcount || 0);
     const st = p.stages || {};
     stageKeys.forEach(k => sum[k] += st[k] || 0);
-    const ms = p.monthlyStats || fallbackByPos[p.position] || { resume: 0, firstIv: 0, onboardMonth: 0 };
+    const ms = p.monthlyStats || fallbackByPos[p.position] || { resume: 0, firstIv: 0, onboardMonth: 0, progressTotalEntry: 0 };
     sum.resume += ms.resume || 0;
     sum.firstIv += ms.firstIv || 0;
     sum.onboardMonth += ms.onboardMonth || 0;
+    // 入职列口径（2026-09-17 应需求：与岗位详情统一为招聘进度 totalEntry）：
+    //   首选 ms.progressTotalEntry（快照写入），缺则 fallback 读 window._progressCurByMonth[month]，再缺则面试表 onboardMonth
+    let ob;
+    if (ms.progressTotalEntry !== undefined && ms.progressTotalEntry !== null) {
+      ob = ms.progressTotalEntry || 0;
+    } else if (fallbackProgressByPos[p.position] !== undefined) {
+      ob = fallbackProgressByPos[p.position] || 0;
+    } else {
+      ob = ms.onboardMonth || 0;
+    }
+    sum.progressTotal += ob;
   });
-  // 完成率口径 = 本月入职 ÷ 需求人数 × 100%（2026-09-17 应需求：与入职列同口径，反映归档月份的当月完成度）
-  const completionRate = sum.headcount > 0 ? Math.round(sum.onboardMonth / sum.headcount * 100) : 0;
+  // 完成率口径 = 入职（招聘进度）÷ 需求 × 100%（与岗位详情/入职列完全一致）
+  const completionRate = sum.headcount > 0 ? Math.round(sum.progressTotal / sum.headcount * 100) : 0;
   if (snap.length === 0) { wrap.innerHTML = '<div style="text-align:center;color:var(--text2);padding:14px">该月归档无岗位数据</div>'; return; }
-  // KPI 卡片（5 张）：简历 / 初面 / 复试 / 完成率 / 入职 —— 入职改按本月入职统计（2026-09-17 应需求）
+  // KPI 卡片（5 张）：简历 / 初面 / 复试 / 完成率 / 入职 —— 入职改用招聘进度 totalEntry（2026-09-17 应需求，与岗位详情完全同口径）
   const histLabels = ['简历筛选','初面','复试','完成率','入职'];
   const histIcons  = ['简','初','复','完','发'];
-  const histValues = [sum.resume, sum.firstIv, sum.secondInterview, completionRate + '%', sum.onboardMonth];
-  let t = `<div style="margin-bottom:10px;font-size:13px;color:var(--text2)">归档时间：${escapeHtml(h.archivedAt||'')} ｜ ${snap.length} 个岗位 ｜ 完成率 ${completionRate}% ｜ 本月入职 ${sum.onboardMonth} 人</div>
+  const histValues = [sum.resume, sum.firstIv, sum.secondInterview, completionRate + '%', sum.progressTotal];
+  let t = `<div style="margin-bottom:10px;font-size:13px;color:var(--text2)">归档时间：${escapeHtml(h.archivedAt||'')} ｜ ${snap.length} 个岗位 ｜ 完成率 ${completionRate}% ｜ 本月入职 ${sum.progressTotal} 人</div>
     <div class="board-columns">${histLabels.map((lb,i)=>`<div class="board-col"><div class="board-col-icon">${histIcons[i]}</div><div class="board-col-body"><div class="board-col-count">${histValues[i]}</div><div class="board-col-label">${lb}</div></div></div>`).join('')}</div>
     <div style="overflow-x:auto;margin-top:10px"><table class="pos-table">
       <tr><th>岗位</th><th>部门</th><th>需求</th><th>简历</th><th>初面</th><th>复试</th><th>Offer</th><th>入职</th><th>完成率</th></tr>`;
   snap.forEach(p => {
     const st = p.stages || {};
     const hc = p.headcount || 0;
-    const ms = p.monthlyStats || fallbackByPos[p.position] || { resume: 0, firstIv: 0, onboardMonth: 0 };
-    // 完成率 = 本月入职 ÷ 需求，与入职列同口径（2026-09-17 应需求）
-    const obMonth = ms.onboardMonth || 0;
+    const ms = p.monthlyStats || fallbackByPos[p.position] || { resume: 0, firstIv: 0, onboardMonth: 0, progressTotalEntry: 0 };
+    // 入职口径（2026-09-17 应需求）：首选 ms.progressTotalEntry，fallback fallbackProgressByPos，再 onboardMonth
+    let obMonth;
+    if (ms.progressTotalEntry !== undefined && ms.progressTotalEntry !== null) {
+      obMonth = ms.progressTotalEntry || 0;
+    } else if (fallbackProgressByPos[p.position] !== undefined) {
+      obMonth = fallbackProgressByPos[p.position] || 0;
+    } else {
+      obMonth = ms.onboardMonth || 0;
+    }
+    // 完成率 = 入职（招聘进度）÷ 需求，与入职列同口径
     const rate = hc > 0 ? Math.round(obMonth / hc * 100) : 0;
     t += `<tr><td><strong>${escapeHtml(p.position)}</strong></td><td>${escapeHtml(p.dept||'')}</td><td>${hc}</td>
       <td><strong style="color:var(--primary)">${ms.resume||0}</strong></td>
@@ -1611,13 +1633,13 @@ function renderBoardHistory(month) {
       <td><strong style="color:var(--primary)">${obMonth}</strong></td>
       <td><strong style="color:${rate>=100?'var(--success)':rate>0?'var(--primary)':'var(--text3)'}">${rate}%</strong></td></tr>`;
   });
-  // 合计行（最后一行）—— 入职列改用本月入职口径（2026-09-17 应需求）
+  // 合计行（最后一行）—— 入职列改用招聘进度 totalEntry（2026-09-17 应需求，与岗位详情同口径）
   t += `<tr class="row-total">
     <td><strong>合计</strong></td><td></td><td><strong>${sum.headcount}</strong></td>
     <td><strong style="color:var(--primary)">${sum.resume}</strong></td>
     <td><strong style="color:var(--primary)">${sum.firstIv}</strong></td>
     <td><strong>${sum.secondInterview}</strong></td><td><strong>${sum.offer}</strong></td>
-    <td><strong style="color:var(--primary)">${sum.onboardMonth}</strong></td>
+    <td><strong style="color:var(--primary)">${sum.progressTotal}</strong></td>
     <td><strong style="color:${completionRate>=100?'var(--success)':'var(--primary)'}">${completionRate}%</strong></td>
   </tr>`;
   t += `</table></div>`;
@@ -3901,6 +3923,18 @@ async function render() {
     (progress || []).forEach(p => { if (p && p.position) window._progressCur[p.position] = p; });
     window._boardOnboardMap = {};
     (positions || []).forEach(p => { window._boardOnboardMap[p.position] = (p.stages && p.stages.onboard) || 0; });
+    // 历史看板入职列 fallback 用：按月份聚合 progress.totalEntry（与岗位详情口径统一）
+    try {
+      const allProg = await apiGet('/api/progress');
+      window._progressCurByMonth = {};
+      (Array.isArray(allProg) ? allProg : []).forEach(p => {
+        if (!p || !p.month || !p.position) return;
+        if (!window._progressCurByMonth[p.month]) window._progressCurByMonth[p.month] = { byPos: {}, rows: [] };
+        if (!window._progressCurByMonth[p.month].byPos[p.position]) window._progressCurByMonth[p.month].byPos[p.position] = 0;
+        window._progressCurByMonth[p.month].byPos[p.position] += (p.totalEntry || 0);
+        window._progressCurByMonth[p.month].rows.push(p);
+      });
+    } catch(e) { window._progressCurByMonth = {}; }
     // 兜底用：历史快照缺 monthlyStats 时按 month 实时遍历 interviews 补算简历/初面
     window._interviewAllCache = interviews || [];
     // 招聘看板月度简历/初面快照（按月份），来源：「从面试管理同步」按钮；无快照时 boardStat 兜底实时统计

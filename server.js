@@ -1741,12 +1741,15 @@ function prevMonthStr(d) {
 }
 // 生成某岗位集的看板快照（仅保留展示与统计所需字段）。
 // 接受 month（YYYY-MM）参数：按归档月份实时统计每个岗位的简历/初面/当月入职（onboardMonth），
-// 写入 monthlyStats 字段 —— 历史看板能稳定复现「归档那一刻」的漏斗+本月入职，不依赖实时 interviews。
-// 月份为空时 monthlyStats 全为 0（兼容旧调用）。
-function boardSnapshotOf(list, month) {
+// 以及招聘进度模块的「总入职」（progressTotalEntry）作为入列首选数据源（2026-09-17 应需求：与岗位详情保持口径一致）。
+// 写入 monthlyStats 字段 —— 历史看板能稳定复现「归档那一刻」的漏斗，不依赖实时 interviews/progress 表。
+// progressList（可选）：该月份的招聘进度行数组；若不传则 progressTotalEntry 全为 0（兼容旧调用）。
+function boardSnapshotOf(list, month, progressList) {
   const yyyymm = (month && /^\d{4}-\d{2}$/.test(month)) ? month : '';
   // 按月份+岗位预聚合 interviews（与岗位详情 boardStat 口径一致）
   const byPos = {};
+  // 按月份+岗位预聚合招聘进度 totalEntry（2026-09-17 与岗位详情统一为同一口径）
+  const progressByPos = {};
   if (yyyymm) {
     (db.interviews || []).forEach(iv => {
       if (!iv || !iv.position) return;
@@ -1761,12 +1764,19 @@ function boardSnapshotOf(list, month) {
         const advanced = isOnboarded(iv) || ['通过', '待复试', 'Offer', '已入职', '待入职'].includes(r);
         if (advanced) byPos[iv.position].firstIv++;
       }
-      // 本月入职：按 secondInterviewDate（入职时间）所在月，口径与本年入职一致 —— 含已离职不剔除（2026-09-17 应需求）
+      // 本月入职（次选字段，仅作兜底）：按 secondInterviewDate（入职时间）所在月
       if (iv.secondInterviewDate && monthOfDate(iv.secondInterviewDate) === yyyymm) {
         if (!byPos[iv.position]) byPos[iv.position] = { resume: 0, firstIv: 0, onboardMonth: 0 };
         byPos[iv.position].onboardMonth++;
       }
     });
+    // 招聘进度 totalEntry（首选入列字段，与岗位详情"本月入职"口径完全一致）
+    if (Array.isArray(progressList)) {
+      progressList.forEach(pr => {
+        if (!pr || !pr.position || !pr.month || pr.month !== yyyymm) return;
+        progressByPos[pr.position] = (progressByPos[pr.position] || 0) + (pr.totalEntry || 0);
+      });
+    }
   }
   return (list || []).map(p => {
     const ms = byPos[p.position] || { resume: 0, firstIv: 0, onboardMonth: 0 };
@@ -1781,13 +1791,14 @@ function boardSnapshotOf(list, month) {
         offer: (p.stages && p.stages.offer) || 0,
         onboard: (p.stages && p.stages.onboard) || 0
       },
-      // 按归档月份实时统计：简历 / 初面 / 本月入职（2026-09-17 应需求：入职列改按归档月份取数）
+      // 按归档月份写入：简历 / 初面 / 本月入职(面试表) / 本月入职(进度表，作为入列首选)
       monthlyStats: yyyymm ? {
         resume: ms.resume,
         firstIv: ms.firstIv,
         onboardMonth: ms.onboardMonth,
+        progressTotalEntry: progressByPos[p.position] || 0,
         syncedAt: new Date().toISOString().slice(0, 19).replace('T', ' ')
-      } : { resume: 0, firstIv: 0, onboardMonth: 0 }
+      } : { resume: 0, firstIv: 0, onboardMonth: 0, progressTotalEntry: 0 }
     };
   });
 }
@@ -1844,7 +1855,7 @@ function archiveBoardSnapshot(month, opts) {
   db.boardHistory.unshift({
     id: genId(), month,
     archivedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
-    snapshot: boardSnapshotOf(db.positions, month),
+    snapshot: boardSnapshotOf(db.positions, month, (db.progress || []).filter(p => p.month === month)),
     summary: monthMetrics(month),
     overwritten: overwrite
   });
