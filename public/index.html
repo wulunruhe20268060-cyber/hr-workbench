@@ -1816,9 +1816,6 @@ async function renderInterviews(interviews, positions) {
   html += `<div class="card">
     <div class="card-header"><h2>面试记录</h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-outline btn-sm" onclick="showBatchImport()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>批量粘贴
-        </button>
         <button class="btn btn-success btn-sm" onclick="document.getElementById('interviewCSVUpload').click()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>上传表格
         </button>
@@ -1839,9 +1836,6 @@ async function renderInterviews(interviews, positions) {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>恢复数据
         </button>
         <input type="file" id="backupImportFile" accept=".json" style="display:none" onchange="restoreAllData(this)">`:''}
-        <button class="btn btn-primary btn-sm" onclick="showAddInterview()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>新增面试
-        </button>
       </div>
     </div>`;
   
@@ -3597,7 +3591,8 @@ async function renderContracts(contracts) {
 
   let html = `<div class="card">
     <div class="card-header"><h2>劳动合同台账</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex:1 1 auto;min-width:0;justify-content:flex-end">
+        <input class="search-input" id="filtContract" placeholder="搜索员工姓名 / 部门 / 签订单位" oninput="filterContracts()" style="flex:1 1 200px;min-width:180px;max-width:360px">
         <button class="btn btn-outline btn-sm" onclick="document.getElementById('contractUpload').click()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>上传表格
         </button>
@@ -3670,10 +3665,6 @@ async function renderContracts(contracts) {
   // Cache for filtering
   window._contractsData = contracts;
   window._contractsTodayStr = todayStr;
-
-  html += `<div class="search-filter-bar">
-    <input class="search-input" id="filtContract" placeholder="搜索员工姓名 / 部门 / 签订单位 / 备注" oninput="filterContracts()">
-  </div>`;
 
   html += `<div class="batch-delete-bar">
     <span style="color:var(--danger);font-weight:600">已选 <span class="batch-count">0</span> 项</span>
