@@ -41,7 +41,7 @@ app.use(express.static(path.join(__dirname, 'public'), {
 app.disable('etag');
 
 // ========== Database ==========
-let db = { users: [], positions: [], interviews: [], todos: [], templates: [], hires: [], progress: [], contracts: [], jobSpecs: [], candidates: [], questionBanks: [], hiringDecisions: [], probations: [], boardHistory: [] };
+let db = { users: [], positions: [], interviews: [], todos: [], templates: [], hires: [], progress: [], contracts: [], jobSpecs: [], candidates: [], questionBanks: [], hiringDecisions: [], probations: [], boardHistory: [], boardMonthlyStats: {} };
 let tokens = {};
 
 // ---- Postgres (optional): used when DATABASE_URL is set, else falls back to JSON file ----
@@ -135,8 +135,9 @@ function dbCounts(src) {
   const d = src || db;
   const out = {};
   ['interviews', 'hires', 'positions', 'progress', 'contracts', 'users', 'todos', 'templates',
-   'boardHistory', 'candidates', 'jobSpecs', 'questionBanks', 'hiringDecisions', 'probations'].forEach(k => {
-    out[k] = Array.isArray(d[k]) ? d[k].length : 0;
+   'boardHistory', 'candidates', 'jobSpecs', 'questionBanks', 'hiringDecisions', 'probations',
+   'boardMonthlyStats'].forEach(k => {
+    out[k] = Array.isArray(d[k]) ? d[k].length : (typeof d[k] === 'object' && d[k] ? Object.keys(d[k]).length : 0);
   });
   return out;
 }
@@ -1666,6 +1667,12 @@ app.post('/api/backup/import', authMiddleware, adminOnly, async (req, res) => {
       report[k] = { mode: 'overwrite', before: (db[k] || []).length, after: src[k].length };
       db[k] = src[k];
     });
+    // boardMonthlyStats 是对象类型快照，独立合并
+    if (src.boardMonthlyStats && typeof src.boardMonthlyStats === 'object') {
+      if (mode === 'overwrite') db.boardMonthlyStats = { ...src.boardMonthlyStats };
+      else db.boardMonthlyStats = { ...(db.boardMonthlyStats || {}), ...src.boardMonthlyStats };
+      report.boardMonthlyStats = { mode, before: Object.keys(db.boardMonthlyStats || {}).length };
+    }
   } else {
     ARR_KEYS.forEach(k => {
       if (!Array.isArray(src[k])) return;
@@ -1682,6 +1689,13 @@ app.post('/api/backup/import', authMiddleware, adminOnly, async (req, res) => {
       });
       report[k] = { mode: 'merge', before: idx.size, added, updated, after: db[k].length };
     });
+    if (src.boardMonthlyStats && typeof src.boardMonthlyStats === 'object') {
+      if (!db.boardMonthlyStats) db.boardMonthlyStats = {};
+      Object.entries(src.boardMonthlyStats).forEach(([m, val]) => {
+        db.boardMonthlyStats[m] = val; // 月份快照整体替换
+      });
+      report.boardMonthlyStats = { mode: 'merge', months: Object.keys(src.boardMonthlyStats).length };
+    }
   }
   db._updatedAt = new Date().toISOString();
   await saveDb();
@@ -2099,6 +2113,72 @@ app.post('/api/board/sync-from-progress', authMiddleware, adminOnly, (req, res) 
   });
   saveDb();
   res.json({ ok: true, month, added, updated, renamed, total: rows.length });
+});
+
+// 手动同步：将指定月份（默认当月）面试管理面试表的简历/初面，按岗位+月份汇总到
+// db.boardMonthlyStats[month][position] = { resume, firstIv }，与实时统计并存。
+// 用途：① 让历史看板按归档月份稳定读取简历/初面快照（避免依赖实时 interviews）；
+//      ② 让看板岗位详情在面试表数据修复后能一键重算并固化到月度快照；
+// 写入位置：db.boardMonthlyStats（独立对象字段，不破坏 positions.stages 的语义）；
+// 累加：同时把当月汇总数累加到 positions.stages.firstInterview（看板累计初面），便于跨月趋势。
+app.post('/api/board/sync-from-interviews', authMiddleware, adminOnly, (req, res) => {
+  const month = (req.body && req.body.month && /^\d{4}-\d{2}$/.test(req.body.month))
+    ? req.body.month : curMonthStr();
+  if (!Array.isArray(db.interviews)) db.interviews = [];
+  if (!db.boardMonthlyStats || typeof db.boardMonthlyStats !== 'object') db.boardMonthlyStats = {};
+  if (!db.boardMonthlyStats[month]) db.boardMonthlyStats[month] = {};
+
+  // 1) 从面试表按岗位+月份汇总简历/初面
+  const byPos = {}; // { posName: { resume, firstIv, candidates: Set<id> } }
+  db.interviews.forEach(iv => {
+    if (!iv || !iv.position) return;
+    const fid = (iv.firstInterviewDate || '').toString().trim();
+    if (!fid) return;
+    if (monthOfDate(fid) !== month) return;
+    const r = (iv.result || '').toString();
+    if (r === '淘汰' || r === '失败' || r === '未通过') return;
+    const notes = (iv.notes || '').toString();
+    if (['淘汰', '失败', '未通过'].some(k => notes.includes(k))) return;
+    if (!byPos[iv.position]) byPos[iv.position] = { resume: 0, firstIv: 0, candidateIds: new Set() };
+    byPos[iv.position].resume++;
+    byPos[iv.position].candidateIds.add(iv.id);
+    // 初面 = 简历中推进后续流程的（已入职/通过/待复试/Offer）
+    const advanced = isOnboarded(iv) || ['通过', '待复试', 'Offer', '已入职', '待入职'].includes(r);
+    if (advanced) byPos[iv.position].firstIv++;
+  });
+
+  // 2) 写入月度快照
+  let synced = 0, totalResume = 0, totalFirstIv = 0;
+  const posNames = new Set([...Object.keys(byPos), ...db.positions.map(p => p.position)]);
+  posNames.forEach(posName => {
+    const st = byPos[posName] || { resume: 0, firstIv: 0 };
+    db.boardMonthlyStats[month][posName] = {
+      resume: st.resume,
+      firstIv: st.firstIv,
+      candidates: st.candidateIds ? st.candidateIds.size : 0,
+      syncedAt: new Date().toISOString().slice(0, 19).replace('T', ' ')
+    };
+    totalResume += st.resume;
+    totalFirstIv += st.firstIv;
+    if (st.resume || st.firstIv) synced++;
+  });
+  saveDb();
+  res.json({
+    ok: true, month,
+    syncedPositions: synced,
+    totalResume, totalFirstIv,
+    detail: Object.fromEntries(Object.entries(db.boardMonthlyStats[month]).map(
+      ([k, v]) => [k, { resume: v.resume, firstIv: v.firstIv, candidates: v.candidates }]
+    ))
+  });
+});
+
+// 读取某月（默认当月）招聘看板月度快照（供前端 boardStat 兜底）
+app.get('/api/board/monthly-stats', authMiddleware, (req, res) => {
+  if (!db.boardMonthlyStats || typeof db.boardMonthlyStats !== 'object') db.boardMonthlyStats = {};
+  const month = (req.query.month && /^\d{4}-\d{2}$/.test(req.query.month)) ? req.query.month : null;
+  if (month) return res.json(db.boardMonthlyStats[month] || {});
+  res.json(db.boardMonthlyStats);
 });
 
 // ========== LocalStorage Migration ==========
@@ -2627,6 +2707,7 @@ app.get('*', (req, res) => {
   if (!db.contracts) db.contracts = [];
   // Ensure newly-added collections exist even when loading an older db.json
   ['jobSpecs', 'candidates', 'questionBanks', 'hiringDecisions', 'probations', 'boardHistory'].forEach(k => { if (!db[k]) db[k] = []; });
+  if (!db.boardMonthlyStats || typeof db.boardMonthlyStats !== 'object') db.boardMonthlyStats = {};
   // 启动即自动快照当前库（在任何迁移/清洗/播种之前），保留最近 8 份。
   // Postgres 模式下快照存进 kv 表（随数据库一起持久化，重新部署不丢）；文件模式存 data/backups/。
   try {

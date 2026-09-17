@@ -1288,16 +1288,23 @@ let boardHistoryCache = [];
 function boardStat(posName, interviews, month) {
   const progressCur = window._progressCur || {};
   const boardOnboardMap = window._boardOnboardMap || {};
+  const boardMonthly = window._boardMonthly || {}; // 月度快照：{ "YYYY-MM": { posName: { resume, firstIv } } }
   month = month || progressMonthStr();
   let resume = 0, firstIv = 0;
-  // 简历/初面：来自面试管理面试表
-  (interviews || []).forEach(iv => {
-    if (iv.position !== posName) return;
-    if (iv.firstInterviewDate && bMonthOf(iv.firstInterviewDate) === month && !bIsEliminated(iv)) {
-      resume++;
-      if (bIsOnboarded(iv) || bIvResultIn(iv, ['通过', '待复试', 'Offer'])) firstIv++;
-    }
-  });
+  // 简历/初面：优先读月度快照（与「从面试管理同步」按钮配合），无快照则实时统计面试表
+  const snap = boardMonthly[month] && boardMonthly[month][posName];
+  if (snap && typeof snap.resume === 'number') {
+    resume = snap.resume;
+    firstIv = typeof snap.firstIv === 'number' ? snap.firstIv : 0;
+  } else {
+    (interviews || []).forEach(iv => {
+      if (iv.position !== posName) return;
+      if (iv.firstInterviewDate && bMonthOf(iv.firstInterviewDate) === month && !bIsEliminated(iv)) {
+        resume++;
+        if (bIsOnboarded(iv) || bIvResultIn(iv, ['通过', '待复试', 'Offer'])) firstIv++;
+      }
+    });
+  }
   // 岗位/部门/本月入职：来自招聘进度模块当月行
   const prog = progressCur[posName] || {};
   const obMonth = prog.totalEntry || 0;            // 本月入职 ← 招聘进度当月入职合计
@@ -1362,6 +1369,8 @@ async function renderBoard(positions, boardHistory, interviews, progress) {
         ${canEdit && positions.length > 0 ? `<button class="btn btn-success btn-sm" id="batchSaveBtn" onclick="saveBatchEdit()" style="display:none">保存批量修改</button>` : ''}
         ${canEdit ? `<button class="btn btn-outline btn-sm" onclick="syncBoardFromProgress()" title="按当前招聘进度模块的岗位/部门/需求，手动同步到招聘看板岗位详情（与自动同步并存）">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>从招聘进度同步</button>` : ''}
+        ${canEdit ? `<button class="btn btn-outline btn-sm" onclick="syncBoardFromInterviews()" title="按当前招聘进度月份，从面试管理模块的面试记录表中按岗位、人员、月份提取简历/初面人数，写入招聘看板月度快照（与实时统计并存）">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>从面试管理同步</button>` : ''}
         ${canEdit ? `<button class="btn btn-success btn-sm" onclick="document.getElementById('positionUpload').click()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>上传表格
         </button><input type="file" id="positionUpload" accept=".csv,.txt,.xlsx,.xls" style="display:none" onchange="handlePositionUpload(event)">` : ''}
@@ -1486,6 +1495,16 @@ async function syncBoardFromProgress() {
     const r = await apiPost('/api/board/sync-from-progress', { month: progressMonthStr() });
     await render();
     showToast(`已从招聘进度同步 ${r.month||progressMonthStr()}：${r.added} 个新建、${r.updated} 个更新`);
+  } catch(e) { showToast('同步失败：' + e.message); }
+}
+// 手动同步：按当前招聘进度月份从面试管理面试表中按岗位/月份汇总简历/初面，写入月度快照（与实时统计并存）
+async function syncBoardFromInterviews() {
+  if (!isAdmin()) { showToast('仅管理员可操作'); return; }
+  const month = progressMonthStr();
+  try {
+    const r = await apiPost('/api/board/sync-from-interviews', { month });
+    await render();
+    showToast(`已从面试管理同步 ${r.month||month}：${r.syncedPositions||0} 个岗位、简历 ${r.totalResume||0} 人、初面 ${r.totalFirstIv||0} 人`);
   } catch(e) { showToast('同步失败：' + e.message); }
 }
 async function deleteBoardArchive() {
@@ -3807,6 +3826,11 @@ async function render() {
     (progress || []).forEach(p => { if (p && p.position) window._progressCur[p.position] = p; });
     window._boardOnboardMap = {};
     (positions || []).forEach(p => { window._boardOnboardMap[p.position] = (p.stages && p.stages.onboard) || 0; });
+    // 招聘看板月度简历/初面快照（按月份），来源：「从面试管理同步」按钮；无快照时 boardStat 兜底实时统计
+    try {
+      const monthly = await apiGet('/api/board/monthly-stats');
+      window._boardMonthly = (monthly && typeof monthly === 'object') ? monthly : {};
+    } catch(e) { window._boardMonthly = {}; }
     let contracts = [];
     try { contracts = await apiGet('/api/contracts'); } catch(e) {}
     
