@@ -1739,13 +1739,49 @@ function prevMonthStr(d) {
   m -= 1; if (m < 1) { m = 12; y -= 1; }
   return monthStr(y, m);
 }
-// 生成某岗位集的看板快照（仅保留展示与统计所需字段）
-function boardSnapshotOf(list) {
-  return (list || []).map(p => ({
-    position: p.position, dept: p.dept || '', headcount: p.headcount || 0,
-    deadline: p.deadline || '', status: p.status || 'active',
-    stages: { resumeScreen: (p.stages && p.stages.resumeScreen) || 0, firstInterview: (p.stages && p.stages.firstInterview) || 0, secondInterview: (p.stages && p.stages.secondInterview) || 0, finalInterview: (p.stages && p.stages.finalInterview) || 0, offer: (p.stages && p.stages.offer) || 0, onboard: (p.stages && p.stages.onboard) || 0 }
-  }));
+// 生成某岗位集的看板快照（仅保留展示与统计所需字段）。
+// 接受 month（YYYY-MM）参数：按归档月份实时统计每个岗位的简历/初面/当月入职，写入 monthlyStats，
+// 这样历史看板能稳定复现「归档那一刻」的漏斗数据，不依赖实时 interviews 表。
+// 月份为空时 monthlyStats 全为 0（兼容旧调用）。
+function boardSnapshotOf(list, month) {
+  const yyyymm = (month && /^\d{4}-\d{2}$/.test(month)) ? month : '';
+  // 按月份+岗位预聚合 interviews（与岗位详情 boardStat 口径一致）
+  const byPos = {};
+  if (yyyymm) {
+    (db.interviews || []).forEach(iv => {
+      if (!iv || !iv.position || !iv.firstInterviewDate) return;
+      if (monthOfDate(iv.firstInterviewDate) !== yyyymm) return;
+      const r = (iv.result || '').toString();
+      if (r === '淘汰' || r === '失败' || r === '未通过') return;
+      const notes = (iv.notes || '').toString();
+      if (['淘汰', '失败', '未通过'].some(k => notes.includes(k))) return;
+      if (!byPos[iv.position]) byPos[iv.position] = { resume: 0, firstIv: 0 };
+      byPos[iv.position].resume++;
+      const advanced = isOnboarded(iv) || ['通过', '待复试', 'Offer', '已入职', '待入职'].includes(r);
+      if (advanced) byPos[iv.position].firstIv++;
+    });
+  }
+  return (list || []).map(p => {
+    const ms = byPos[p.position] || { resume: 0, firstIv: 0 };
+    return {
+      position: p.position, dept: p.dept || '', headcount: p.headcount || 0,
+      deadline: p.deadline || '', status: p.status || 'active',
+      stages: {
+        resumeScreen: (p.stages && p.stages.resumeScreen) || 0,
+        firstInterview: (p.stages && p.stages.firstInterview) || 0,
+        secondInterview: (p.stages && p.stages.secondInterview) || 0,
+        finalInterview: (p.stages && p.stages.finalInterview) || 0,
+        offer: (p.stages && p.stages.offer) || 0,
+        onboard: (p.stages && p.stages.onboard) || 0
+      },
+      // 按归档月份实时统计的漏斗数据（2026-09-17 应需求新增，历史快照缺此字段时前端 fallback 实时统计）
+      monthlyStats: yyyymm ? {
+        resume: ms.resume,
+        firstIv: ms.firstIv,
+        syncedAt: new Date().toISOString().slice(0, 19).replace('T', ' ')
+      } : { resume: 0, firstIv: 0 }
+    };
+  });
 }
 // 某月的真实指标：面试数(按 firstInterviewDate 所在月) + 入职/流失(按对应日期所在月)
 // 全部从「面试管理」interviews 表实时统计，与招聘看板口径一致（2026-09-17 定稿）：
@@ -1800,7 +1836,7 @@ function archiveBoardSnapshot(month, opts) {
   db.boardHistory.unshift({
     id: genId(), month,
     archivedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
-    snapshot: boardSnapshotOf(db.positions),
+    snapshot: boardSnapshotOf(db.positions, month),
     summary: monthMetrics(month),
     overwritten: overwrite
   });

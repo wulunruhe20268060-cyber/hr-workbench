@@ -1546,22 +1546,45 @@ function renderBoardHistory(month) {
   const h = boardHistoryCache.find(x => x.month === month);
   if (!h) { wrap.innerHTML = '<div style="text-align:center;color:var(--text2);padding:14px">该月份无归档数据</div>'; return; }
   const snap = h.snapshot || [];
-  // 数据源：已归档的本月看板快照 h.snapshot（positions.stages + headcount），与实时统计脱钩
+  // 兜底：若快照缺 monthlyStats（旧归档），按 month 实时遍历 window._interviewAllCache 补算
+  // _interviewAllCache 在 render() 时注入全量 interviews；缺失则空兜底=0
+  const ivCache = (typeof window !== 'undefined' && window._interviewAllCache) || [];
+  const needFallback = snap.some(p => !p.monthlyStats);
+  const fallbackByPos = {};
+  if (needFallback) {
+    ivCache.forEach(iv => {
+      if (!iv || !iv.position || !iv.firstInterviewDate) return;
+      if (bMonthOf(iv.firstInterviewDate) !== month) return;
+      const r = (iv.result || '').toString();
+      if (r === '淘汰' || r === '失败' || r === '未通过') return;
+      const notes = (iv.notes || '').toString();
+      if (['淘汰', '失败', '未通过'].some(k => notes.includes(k))) return;
+      if (!fallbackByPos[iv.position]) fallbackByPos[iv.position] = { resume: 0, firstIv: 0 };
+      fallbackByPos[iv.position].resume++;
+      const advanced = bIsOnboarded(iv) || bIvResultIn(iv, ['通过', '待复试', 'Offer', '已入职', '待入职']);
+      if (advanced) fallbackByPos[iv.position].firstIv++;
+    });
+  }
+  // 数据源：优先读快照 monthlyStats（2026-09-17 应需求新增），缺失则 fallback 实时统计
   const stageKeys = ['resumeScreen','firstInterview','secondInterview','offer','onboard'];
   const sum = {}; stageKeys.forEach(k => sum[k] = 0);
   sum.headcount = 0;
+  sum.resume = 0; sum.firstIv = 0;
   snap.forEach(p => {
     sum.headcount += (p.headcount || 0);
     const st = p.stages || {};
     stageKeys.forEach(k => sum[k] += st[k] || 0);
+    const ms = p.monthlyStats || fallbackByPos[p.position] || { resume: 0, firstIv: 0 };
+    sum.resume += ms.resume || 0;
+    sum.firstIv += ms.firstIv || 0;
   });
   // 完成率口径 = 入职人数 ÷ 需求人数 × 100%（与 KPI 英雄带口径一致）
   const completionRate = sum.headcount > 0 ? Math.round(sum.onboard / sum.headcount * 100) : 0;
   if (snap.length === 0) { wrap.innerHTML = '<div style="text-align:center;color:var(--text2);padding:14px">该月归档无岗位数据</div>'; return; }
-  // KPI 卡片（5 张）：简历/初面/复试/完成率/入职 —— 第 4 张由 Offer 改为完成率（2026-09-17 应需求）
+  // KPI 卡片（5 张）：简历 / 初面 / 复试 / 完成率 / 入职
   const histLabels = ['简历筛选','初面','复试','完成率','入职'];
   const histIcons  = ['简','初','复','完','发'];
-  const histValues = [sum.resumeScreen, sum.firstInterview, sum.secondInterview, completionRate + '%', sum.onboard];
+  const histValues = [sum.resume, sum.firstIv, sum.secondInterview, completionRate + '%', sum.onboard];
   let t = `<div style="margin-bottom:10px;font-size:13px;color:var(--text2)">归档时间：${escapeHtml(h.archivedAt||'')} ｜ ${snap.length} 个岗位 ｜ 完成率 ${completionRate}%</div>
     <div class="board-columns">${histLabels.map((lb,i)=>`<div class="board-col"><div class="board-col-icon">${histIcons[i]}</div><div class="board-col-body"><div class="board-col-count">${histValues[i]}</div><div class="board-col-label">${lb}</div></div></div>`).join('')}</div>
     <div style="overflow-x:auto;margin-top:10px"><table class="pos-table">
@@ -1569,16 +1592,20 @@ function renderBoardHistory(month) {
   snap.forEach(p => {
     const st = p.stages || {};
     const hc = p.headcount || 0;
+    const ms = p.monthlyStats || fallbackByPos[p.position] || { resume: 0, firstIv: 0 };
     const rate = hc > 0 ? Math.round((st.onboard || 0) / hc * 100) : 0;
     t += `<tr><td><strong>${escapeHtml(p.position)}</strong></td><td>${escapeHtml(p.dept||'')}</td><td>${hc}</td>
-      <td>${st.resumeScreen||0}</td><td>${st.firstInterview||0}</td><td>${st.secondInterview||0}</td><td>${st.offer||0}</td>
+      <td><strong style="color:var(--primary)">${ms.resume||0}</strong></td>
+      <td><strong style="color:var(--primary)">${ms.firstIv||0}</strong></td>
+      <td>${st.secondInterview||0}</td><td>${st.offer||0}</td>
       <td><strong style="color:var(--primary)">${st.onboard||0}</strong></td>
       <td><strong style="color:${rate>=100?'var(--success)':rate>0?'var(--primary)':'var(--text3)'}">${rate}%</strong></td></tr>`;
   });
   // 合计行（最后一行）—— 2026-09-17 应需求新增
   t += `<tr class="row-total">
     <td><strong>合计</strong></td><td></td><td><strong>${sum.headcount}</strong></td>
-    <td><strong>${sum.resumeScreen}</strong></td><td><strong>${sum.firstInterview}</strong></td>
+    <td><strong style="color:var(--primary)">${sum.resume}</strong></td>
+    <td><strong style="color:var(--primary)">${sum.firstIv}</strong></td>
     <td><strong>${sum.secondInterview}</strong></td><td><strong>${sum.offer}</strong></td>
     <td><strong style="color:var(--primary)">${sum.onboard}</strong></td>
     <td><strong style="color:${completionRate>=100?'var(--success)':'var(--primary)'}">${completionRate}%</strong></td>
@@ -3864,6 +3891,8 @@ async function render() {
     (progress || []).forEach(p => { if (p && p.position) window._progressCur[p.position] = p; });
     window._boardOnboardMap = {};
     (positions || []).forEach(p => { window._boardOnboardMap[p.position] = (p.stages && p.stages.onboard) || 0; });
+    // 兜底用：历史快照缺 monthlyStats 时按 month 实时遍历 interviews 补算简历/初面
+    window._interviewAllCache = interviews || [];
     // 招聘看板月度简历/初面快照（按月份），来源：「从面试管理同步」按钮；无快照时 boardStat 兜底实时统计
     try {
       const monthly = await apiGet('/api/board/monthly-stats');
