@@ -328,11 +328,6 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 /* Table */
 .pos-table,.interview-table{width:100%;border-collapse:collapse}
 .pos-table tr:hover,.interview-table tr:hover{background:#F5F7FA}
-/* 岗位详情「面试同步」附加行：该岗位不在看板岗位表中（多出现在历史月份），数据来自面试管理同步快照 */
-.pos-table tr.row-virtual td{background:#FBFCFE;color:#5A6C8C}
-.pos-table tr.row-virtual:hover td{background:#F1F6FF}
-.virtual-tag{display:inline-block;margin-left:4px;padding:1px 5px;border-radius:4px;background:#EAF2FF;color:#2E6BE6;font-size:10px;font-weight:600;vertical-align:middle;white-space:nowrap}
-.virtual-tag.tag-prog{background:#FFF3E0;color:#C77700}
 /* 合同台账「签订单位」列：多单位简称垂直堆叠、CJK 之间不强制拆行（用户口述会控制 ≤5 字，不再做硬截行） */
 .sign-unit-block{line-height:1.4;color:var(--text);word-break:keep-all;overflow-wrap:break-word}
 .sign-unit-block-sep{margin-top:4px;padding-top:4px;border-top:1px dashed #DCE6F5}
@@ -1333,6 +1328,45 @@ function bIsEliminated(iv) {
 function bIvResultIn(iv, keys) {
   return keys.includes((iv && iv.result || '').toString());
 }
+// 当月「面试管理」全量简历/初面（含不在看板岗位表里的岗位）。
+// 用途（2026-09-17 用户定稿）：岗位列表只展示看板岗位表、不新增岗位行，
+// 但合计行/历史看板卡片上的简历、初面数字要反映面试管理当月真实全量。
+// 取数优先级：① 该月面试同步快照 db.boardMonthlyStats（键=同步时的全部岗位）→ ② 实时遍历面试表。
+// boardNamesSet：视为「已在表内」的岗位集合，用于算出「不在表里」的岗位清单（默认取当前看板岗位表）。
+function monthInterviewTotals(month, interviews, boardNamesSet) {
+  const names = boardNamesSet || new Set(((window._boardPositions) || []).map(p => p.position));
+  let resume = 0, firstIv = 0;
+  const extra = new Set();
+  let extraResume = 0, extraFirstIv = 0;
+  const snap = ((window._boardMonthly || {})[month]) || {};
+  const keys = Object.keys(snap).filter(k => snap[k] && typeof snap[k].resume === 'number');
+  if (keys.length > 0) {
+    keys.forEach(k => {
+      const v = snap[k];
+      resume += v.resume || 0;
+      firstIv += v.firstIv || 0;
+      if (!names.has(k)) { extra.add(k); extraResume += v.resume || 0; extraFirstIv += v.firstIv || 0; }
+    });
+  } else {
+    (interviews || window._interviewAllCache || []).forEach(iv => {
+      if (!iv || !iv.position) return;
+      if (!iv.firstInterviewDate || bMonthOf(iv.firstInterviewDate) !== month) return;
+      if (bIsEliminated(iv)) return;
+      const adv = bIsOnboarded(iv) || bIvResultIn(iv, ['通过', '待复试', 'Offer']);
+      resume++;
+      if (adv) firstIv++;
+      if (!names.has(iv.position)) { extra.add(iv.position); extraResume++; if (adv) extraFirstIv++; }
+    });
+  }
+  return { resume, firstIv, extraNames: Array.from(extra), extraResume, extraFirstIv };
+}
+// 合计行下方的说明（仅在合计含「不在表内岗位」的数据时显示，避免用户以为合计算错）
+function monthAllNote(t, month, scope) {
+  if (!t || !t.extraNames || t.extraNames.length === 0) return '';
+  const list = t.extraNames.slice(0, 6).join('、') + (t.extraNames.length > 6 ? ' 等' : '');
+  return `<div style="margin-top:8px;font-size:12px;color:var(--text2);line-height:1.7">
+    📌 合计中的「简历 / 初面」= 面试管理 ${escapeHtml(month)} 全量，含${scope || '不在上方岗位表里的'} ${t.extraNames.length} 个岗位（${escapeHtml(list)}）：简历 ${t.extraResume} 人、初面 ${t.extraFirstIv} 人。</div>`;
+}
 
 async function renderBoard(positions, boardHistory, interviews, progress) {
   boardHistoryCache = boardHistory || [];
@@ -1348,25 +1382,24 @@ async function renderBoard(positions, boardHistory, interviews, progress) {
   (positions || []).forEach(p => { window._boardOnboardMap[p.position] = (p.stages && p.stages.onboard) || 0; });
 
   const bMonth = progressMonthStr();
-  // 行集合（2026-09-17 修正）：月份维度的岗位详情 = 招聘进度当月行 ∪ 看板岗位表 ∪ 该月面试同步快照中有数据的岗位。
-  // 原因：面试表里的岗位名会随月份变化（如 6 月的「大数据开发/销售主管」），若只渲染看板岗位表，
-  // 「从面试管理同步」汇总到的简历/初面就会有一部分无处显示，导致同步提示的人数与看板合计不一致。
-  const posByName = {};
-  (positions || []).forEach(p => { if (p && p.position) posByName[p.position] = p; });
-  const snapMonth = (window._boardMonthly || {})[bMonth] || {};
-  const rowNames = [];
-  const _seenRow = new Set();
-  const addRow = n => { if (n && !_seenRow.has(n)) { _seenRow.add(n); rowNames.push(n); } };
-  (progress || []).forEach(p => { if (p && p.position) addRow(p.position); });      // 1) 招聘进度当月行（决定顺序）
-  (positions || []).forEach(p => { if (p && p.position) addRow(p.position); });    // 2) 看板岗位表
-  Object.keys(snapMonth).forEach(n => {                                            // 3) 面试同步快照里有数据的岗位
-    const v = snapMonth[n] || {};
-    if ((v.resume || 0) > 0 || (v.firstIv || 0) > 0) addRow(n);
-  });
-
   // 各岗位指标：岗位/部门/本月入职←招聘进度；简历/初面←面试管理；本年入职←招聘看板累加
   const boardStats = {};
-  rowNames.forEach(n => { boardStats[n] = boardStat(n, interviews, bMonth); });
+  (positions || []).forEach(p => { boardStats[p.position] = boardStat(p.position, interviews, bMonth); });
+  // 合计行/卡片口径（2026-09-17 用户定稿）：岗位列表只展示看板岗位表、不新增岗位行；
+  // 但合计数字要反映面试管理当月「全量」（含不在看板岗位表里的岗位，如 6 月的 大数据开发/销售主管）。
+  const monthAll = monthInterviewTotals(bMonth, interviews);
+
+  // 岗位详情行 = 看板岗位表（不新增岗位行）；按招聘进度当月行顺序排列，进度里没有的排后面
+  const progressOrder = {};
+  (progress || []).forEach((p, i) => { if (p && p.position) progressOrder[p.position] = i; });
+  const sortedPositions = (positions || []).slice().sort((a, b) => {
+    const ai = progressOrder[a.position];
+    const bi = progressOrder[b.position];
+    if (ai !== undefined && bi !== undefined) return ai - bi;
+    if (ai !== undefined) return -1;
+    if (bi !== undefined) return 1;
+    return 0;
+  });
 
   // 顶部英雄带已覆盖全局 KPI，岗位列表卡片不再重复展示漏斗带（2026-09-17 应需求移除）；
   // 操作按钮（新增岗位/批量编辑/上传表格）合并到「岗位详情」卡片头部，避免出现空卡片
@@ -1398,7 +1431,7 @@ async function renderBoard(positions, boardHistory, interviews, progress) {
     <button class="btn btn-primary btn-sm" style="flex:0 0 auto" onclick="filterPositions()">查询</button>
     <button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="resetPosFilter()">重置</button>
   </div>`;
-  if (rowNames.length===0) {
+  if ((positions || []).length===0) {
     html += `<div style="text-align:center;color:var(--text2);padding:20px">暂无岗位${canEdit?'，点击上方按钮新增':''}</div>`;
   } else {
     if (canEdit) {
@@ -1410,36 +1443,31 @@ async function renderBoard(positions, boardHistory, interviews, progress) {
     }
     html += `<div style="overflow-x:auto"><table class="pos-table" id="posTable">
       <tr>${canEdit?'<th style="width:40px"><input type="checkbox" onchange="toggleAllRows(this)"></th>':''}<th>岗位</th><th>部门</th><th>需求</th><th>简历</th><th>初面</th><th>复试</th><th>Offer</th><th>本月入职</th><th>本年入职</th>${canEdit?'<th>操作</th>':''}</tr>`;
-    rowNames.forEach(name => {
-      const p = posByName[name] || null;   // 无对应看板岗位时 = 当月附加行（招聘进度 / 面试同步）
-      const st = boardStats[name] || {resume:0,firstIv:0,obMonth:0,obYear:0,dept:'',headcount:0};
+    sortedPositions.forEach(p => {
+      const st = boardStats[p.position] || {resume:0,firstIv:0,obMonth:0,obYear:0,dept:'',headcount:0};
       // 岗位/部门/本月入职 ← 招聘进度模块（随进度同步）；回退到看板自身字段
-      const dept = st.dept || (p && p.dept) || '';
-      const headcount = st.headcount || (p && p.headcount) || 0;
-      // 附加行标记：来自招聘进度的标「招聘进度」，仅来自面试同步快照的标「面试同步」
-      const addTag = p ? '' : ((window._progressCur||{})[name]
-        ? ' <span class="virtual-tag tag-prog" title="该岗位出现在本月招聘进度中，但不在看板岗位表里（多为历史月份），已按进度行一并展示">招聘进度</span>'
-        : ' <span class="virtual-tag" title="该岗位不在招聘看板岗位表中，数据来自「从面试管理同步」的月度快照">面试同步</span>');
-      html += `<tr data-pid="${p?p.id:''}" data-pos="${escapeHtml(name)}"${p?'':' class="row-virtual"'}>
-        ${canEdit?(p?`<td><input type="checkbox" class="row-checkbox" data-id="${p.id}" onchange="updateBatchDeleteBar()"></td>`:'<td></td>'):''}
-        <td><strong>${escapeHtml(name)}</strong>${addTag}</td>
-        <td>${escapeHtml(dept)}</td><td>${p?`<input type="number" value="${headcount||1}" min="1" style="width:50px;text-align:center;padding:4px;border:1px solid transparent;border-radius:4px;font-size:13px;background:transparent" onchange="updatePositionHeadcount('${p.id}', parseInt(this.value)||1)" onfocus="this.style.borderColor='var(--primary)';this.style.background='#fff'" onblur="this.style.borderColor='transparent';this.style.background='transparent'" title="点击修改需求人数">`:`<span>${headcount||0}</span>`}</td>
+      const dept = st.dept || p.dept || '';
+      const headcount = st.headcount || p.headcount || 1;
+      html += `<tr data-pid="${p.id}">
+        ${canEdit?`<td><input type="checkbox" class="row-checkbox" data-id="${p.id}" onchange="updateBatchDeleteBar()"></td>`:''}
+        <td><strong>${escapeHtml(p.position)}</strong></td>
+        <td>${escapeHtml(dept)}</td><td><input type="number" value="${headcount}" min="1" style="width:50px;text-align:center;padding:4px;border:1px solid transparent;border-radius:4px;font-size:13px;background:transparent" onchange="updatePositionHeadcount('${p.id}', parseInt(this.value)||1)" onfocus="this.style.borderColor='var(--primary)';this.style.background='#fff'" onblur="this.style.borderColor='transparent';this.style.background='transparent'" title="点击修改需求人数"></td>
         <td class="computed-cell">${st.resume}</td>
         <td class="computed-cell">${st.firstIv}</td>
-        <td class="batch-cell">${p?((p.stages&&p.stages.secondInterview)||0):0}</td>
-        <td class="batch-cell">${p?((p.stages&&p.stages.offer)||0):0}</td>
+        <td class="batch-cell">${p.stages.secondInterview||0}</td>
+        <td class="batch-cell">${p.stages.offer||0}</td>
         <td class="computed-cell"><strong style="color:var(--primary)">${st.obMonth}</strong></td>
         <td class="computed-cell"><strong style="color:var(--primary)">${st.obYear}</strong></td>
-        ${canEdit ? `<td class="action-cell">${p?`<button class="btn btn-outline btn-xs" onclick="editPosition('${p.id}')">编辑</button><button class="btn btn-danger btn-xs" onclick="deletePosition('${p.id}')">删除</button>`:'<span style="color:var(--text2)">—</span>'}</td>` : ''}
+        ${canEdit ? `<td class="action-cell"><button class="btn btn-outline btn-xs" onclick="editPosition('${p.id}')">编辑</button><button class="btn btn-danger btn-xs" onclick="deletePosition('${p.id}')">删除</button></td>` : ''}
       </tr>`;
     });
 
-    // 合计行（按当前月份实际展示的行汇总，与「从面试管理同步」的汇总口径一致）
-    const totalHc = rowNames.reduce((s,n)=>s+((boardStats[n]&&boardStats[n].headcount)||(posByName[n]&&posByName[n].headcount)||0),0);
-    const totalResume = Object.values(boardStats).reduce((s,st)=>s+(st.resume||0),0);
-    const totalFirstIv = Object.values(boardStats).reduce((s,st)=>s+(st.firstIv||0),0);
-    const totalSecondIv = rowNames.reduce((s,n)=>s+((posByName[n]&&posByName[n].stages&&posByName[n].stages.secondInterview)||0),0);
-    const totalOffer = rowNames.reduce((s,n)=>s+((posByName[n]&&posByName[n].stages&&posByName[n].stages.offer)||0),0);
+    // 合计行：岗位/复试/Offer/各阶段 = 表内岗位累计；简历/初面 = 面试管理当月「全量」（含不在本表的岗位）
+    const totalHc = sortedPositions.reduce((s,p)=>s+(p.headcount||0),0);
+    const totalResume = monthAll.resume;
+    const totalFirstIv = monthAll.firstIv;
+    const totalSecondIv = sortedPositions.reduce((s,p)=>s+((p.stages&&p.stages.secondInterview)||0),0);
+    const totalOffer = sortedPositions.reduce((s,p)=>s+((p.stages&&p.stages.offer)||0),0);
     const totalObMonth = Object.values(boardStats).reduce((s,st)=>s+(st.obMonth||0),0);
     const totalObYear = Object.values(boardStats).reduce((s,st)=>s+(st.obYear||0),0);
     html += `<tr class="row-total">
@@ -1456,6 +1484,7 @@ async function renderBoard(positions, boardHistory, interviews, progress) {
       ${canEdit ? '<td></td>' : ''}
     </tr>`;
     html += `</table></div>`;
+    html += monthAllNote(monthAll, bMonth);
   }
   html += `</div>`;
 
@@ -1536,7 +1565,7 @@ async function syncBoardFromInterviews() {
   try {
     const r = await apiPost('/api/board/sync-from-interviews', { month });
     await render();
-    const extra = (r.extraPositions && r.extraPositions.length) ? `，其中 ${r.extraPositions.length} 个岗位不在看板岗位表、已作为附加行展示` : '';
+    const extra = (r.extraPositions && r.extraPositions.length) ? `（另有 ${r.extraPositions.length} 个岗位不在岗位表，其数据已计入合计与卡片）` : '';
     showToast(`已从面试管理同步 ${r.month||month}：${r.syncedPositions||0} 个岗位、简历 ${r.totalResume||0} 人、初面 ${r.totalFirstIv||0} 人${extra}`);
   } catch(e) { showToast('同步失败：' + e.message); }
 }
@@ -1618,10 +1647,16 @@ function renderBoardHistory(month) {
   // 完成率口径 = 入职（招聘进度）÷ 需求 × 100%（与岗位详情/入职列完全一致）
   const completionRate = sum.headcount > 0 ? Math.round(sum.progressTotal / sum.headcount * 100) : 0;
   if (snap.length === 0) { wrap.innerHTML = '<div style="text-align:center;color:var(--text2);padding:14px">该月归档无岗位数据</div>'; return; }
+  // 卡片/合计口径（2026-09-17 用户定稿）：简历、初面取面试管理该月「全量」，
+  // 含归档岗位明细里没有的岗位（如 6 月的 大数据开发/销售主管）；岗位表不新增行。
+  const archivedNames = new Set(snap.map(p => p.position));
+  const monthAll = monthInterviewTotals(month, null, archivedNames);
+  const cardResume = Math.max(sum.resume, monthAll.resume);
+  const cardFirstIv = Math.max(sum.firstIv, monthAll.firstIv);
   // KPI 卡片（5 张）：简历 / 初面 / 复试 / 完成率 / 入职 —— 入职改用招聘进度 totalEntry（2026-09-17 应需求，与岗位详情完全同口径）
   const histLabels = ['简历筛选','初面','复试','完成率','入职'];
   const histIcons  = ['简','初','复','完','发'];
-  const histValues = [sum.resume, sum.firstIv, sum.secondInterview, completionRate + '%', sum.progressTotal];
+  const histValues = [cardResume, cardFirstIv, sum.secondInterview, completionRate + '%', sum.progressTotal];
   let t = `<div style="margin-bottom:10px;font-size:13px;color:var(--text2)">归档时间：${escapeHtml(h.archivedAt||'')} ｜ ${snap.length} 个岗位 ｜ 完成率 ${completionRate}% ｜ 本月入职 ${sum.progressTotal} 人</div>
     <div class="board-columns">${histLabels.map((lb,i)=>`<div class="board-col"><div class="board-col-icon">${histIcons[i]}</div><div class="board-col-body"><div class="board-col-count">${histValues[i]}</div><div class="board-col-label">${lb}</div></div></div>`).join('')}</div>
     <div style="overflow-x:auto;margin-top:10px"><table class="pos-table">
@@ -1649,15 +1684,17 @@ function renderBoardHistory(month) {
       <td><strong style="color:${rate>=100?'var(--success)':rate>0?'var(--primary)':'var(--text3)'}">${rate}%</strong></td></tr>`;
   });
   // 合计行（最后一行）—— 入职列改用招聘进度 totalEntry（2026-09-17 应需求，与岗位详情同口径）
+  // 简历/初面 = 面试管理该月全量（含未在归档明细里的岗位），与上方卡片一致
   t += `<tr class="row-total">
     <td><strong>合计</strong></td><td></td><td><strong>${sum.headcount}</strong></td>
-    <td><strong style="color:var(--primary)">${sum.resume}</strong></td>
-    <td><strong style="color:var(--primary)">${sum.firstIv}</strong></td>
+    <td><strong style="color:var(--primary)">${cardResume}</strong></td>
+    <td><strong style="color:var(--primary)">${cardFirstIv}</strong></td>
     <td><strong>${sum.secondInterview}</strong></td><td><strong>${sum.offer}</strong></td>
     <td><strong style="color:var(--primary)">${sum.progressTotal}</strong></td>
     <td><strong style="color:${completionRate>=100?'var(--success)':'var(--primary)'}">${completionRate}%</strong></td>
   </tr>`;
   t += `</table></div>`;
+  t += monthAllNote(monthAll, month, '未出现在归档岗位明细里的');
   wrap.innerHTML = t;
 }
 
@@ -4850,16 +4887,16 @@ function setVal(id, v) { const el = document.getElementById(id); if (el) el.valu
 function filterPositions() {
   const kw = (document.getElementById('posSearch')?.value || '').trim().toLowerCase();
   const flow = document.getElementById('posFlow')?.value || '';
-  const rows = document.querySelectorAll('#posTable tr[data-pos]');
+  const rows = document.querySelectorAll('#posTable tr[data-pid]');
   rows.forEach(tr => {
-    const name = tr.dataset.pos || '';
-    const p = (window._boardPositions || []).find(x => x.position === name);
+    const p = (window._boardPositions || []).find(x => x.id === tr.dataset.pid);
+    if (!p) return;
     const txt = tr.textContent.toLowerCase();
     let ok = !kw || txt.includes(kw);
     if (flow === 'gap' || flow === 'full') {
       const _m = progressMonthStr();
-      const st = boardStat(name, window._interviewData || [], _m);
-      const hc = st.headcount || (p && p.headcount) || 1;
+      const st = boardStat(p.position, window._interviewData || [], _m);
+      const hc = st.headcount || p.headcount || 1;
       if (flow === 'gap') ok = ok && st.obMonth < hc;
       if (flow === 'full') ok = ok && st.obMonth >= hc;
     }

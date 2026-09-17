@@ -1852,23 +1852,10 @@ function archiveBoardSnapshot(month, opts) {
   if (existed >= 0 && overwrite) {
     db.boardHistory.splice(existed, 1); // 删除旧版本
   }
-  // 归档行集合与「岗位详情」保持一致：看板岗位表 ∪ 当月招聘进度行 ∪ 当月面试同步快照中有数据的岗位。
-  // （否则历史看板会漏掉当月只出现在进度/面试里的岗位，导致归档合计小于同步提示，2026-09-17 修正）
+  // 归档行集合 = 看板岗位表（与岗位详情列表一致，不额外新增岗位行）。
+  // 2026-09-17 用户定稿：不在岗位表里的岗位不进入列表，只把其简历/初面数据合进历史看板卡片与合计数字
+  // （renderBoardHistory 从 boardMonthlyStats / 面试表按月全量取数，故此处保持 positions 即可）。
   const list = (db.positions || []).slice();
-  const listed = new Set(list.map(p => p.position));
-  (db.progress || []).filter(pr => pr && pr.month === month && pr.position).forEach(pr => {
-    if (listed.has(pr.position)) return;
-    listed.add(pr.position);
-    list.push({ position: pr.position, dept: pr.dept || '', headcount: pr.headcount || 0, status: 'active', stages: {} });
-  });
-  const monthSnap = (db.boardMonthlyStats || {})[month] || {};
-  Object.keys(monthSnap).forEach(n => {
-    const v = monthSnap[n] || {};
-    if ((v.resume || 0) <= 0 && (v.firstIv || 0) <= 0) return;
-    if (listed.has(n)) return;
-    listed.add(n);
-    list.push({ position: n, dept: '', headcount: 0, status: 'active', stages: {} });
-  });
   db.boardHistory.unshift({
     id: genId(), month,
     archivedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
