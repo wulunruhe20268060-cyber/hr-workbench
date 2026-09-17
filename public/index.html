@@ -1326,6 +1326,19 @@ async function renderBoard(positions, boardHistory, interviews, progress) {
   const boardStats = {};
   positions.forEach(p => { boardStats[p.position] = boardStat(p.position, interviews, bMonth); });
 
+  // 按招聘进度当月行顺序排序岗位（用户需求：岗位详情顺序=招聘进度顺序）
+  // 招聘进度里没有的岗位排在最后（按 positions 原顺序）
+  const progressOrder = {};
+  (progress || []).forEach((p, i) => { if (p && p.position) progressOrder[p.position] = i; });
+  const sortedPositions = positions.slice().sort((a, b) => {
+    const ai = progressOrder[a.position];
+    const bi = progressOrder[b.position];
+    if (ai !== undefined && bi !== undefined) return ai - bi;
+    if (ai !== undefined) return -1;
+    if (bi !== undefined) return 1;
+    return 0;
+  });
+
   // 顶部英雄带已覆盖全局 KPI，岗位列表卡片不再重复展示漏斗带（2026-09-17 应需求移除）；
   // 操作按钮（新增岗位/批量编辑/上传表格）合并到「岗位详情」卡片头部，避免出现空卡片
   const boardActions = `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -1366,7 +1379,7 @@ async function renderBoard(positions, boardHistory, interviews, progress) {
     }
     html += `<div style="overflow-x:auto"><table class="pos-table" id="posTable">
       <tr>${canEdit?'<th style="width:40px"><input type="checkbox" onchange="toggleAllRows(this)"></th>':''}<th>岗位</th><th>部门</th><th>需求</th><th>简历</th><th>初面</th><th>复试</th><th>Offer</th><th>本月入职</th><th>本年入职</th>${canEdit?'<th>操作</th>':''}</tr>`;
-    positions.forEach(p => {
+    sortedPositions.forEach(p => {
       const st = boardStats[p.position] || {resume:0,firstIv:0,obMonth:0,obYear:0,dept:'',headcount:0};
       // 岗位/部门/本月入职 ← 招聘进度模块（随进度同步）；回退到看板自身字段
       const dept = st.dept || p.dept || '';
@@ -1384,6 +1397,28 @@ async function renderBoard(positions, boardHistory, interviews, progress) {
         ${canEdit ? `<td class="action-cell"><button class="btn btn-outline btn-xs" onclick="editPosition('${p.id}')">编辑</button><button class="btn btn-danger btn-xs" onclick="deletePosition('${p.id}')">删除</button></td>` : ''}
       </tr>`;
     });
+
+    // 合计行（实时统计，不依赖招聘进度表；用户需求：进度表缺字段带不过来）
+    const totalHc = positions.reduce((s,p)=>s+(p.headcount||0),0);
+    const totalResume = Object.values(boardStats).reduce((s,st)=>s+(st.resume||0),0);
+    const totalFirstIv = Object.values(boardStats).reduce((s,st)=>s+(st.firstIv||0),0);
+    const totalSecondIv = positions.reduce((s,p)=>s+((p.stages&&p.stages.secondInterview)||0),0);
+    const totalOffer = positions.reduce((s,p)=>s+((p.stages&&p.stages.offer)||0),0);
+    const totalObMonth = Object.values(boardStats).reduce((s,st)=>s+(st.obMonth||0),0);
+    const totalObYear = Object.values(boardStats).reduce((s,st)=>s+(st.obYear||0),0);
+    html += `<tr class="row-total">
+      ${canEdit?'<td></td>':''}
+      <td><strong>合计</strong></td>
+      <td></td>
+      <td><strong>${totalHc}</strong></td>
+      <td class="computed-cell">${totalResume}</td>
+      <td class="computed-cell">${totalFirstIv}</td>
+      <td class="batch-cell">${totalSecondIv}</td>
+      <td class="batch-cell">${totalOffer}</td>
+      <td class="computed-cell"><strong style="color:var(--primary)">${totalObMonth}</strong></td>
+      <td class="computed-cell"><strong style="color:var(--primary)">${totalObYear}</strong></td>
+      ${canEdit ? '<td></td>' : ''}
+    </tr>`;
     html += `</table></div>`;
   }
   html += `</div>`;
@@ -1393,15 +1428,15 @@ async function renderBoard(positions, boardHistory, interviews, progress) {
   const hist = boardHistoryCache;
   html += `<div class="card" id="histCard"><div class="card-header" style="cursor:pointer" onclick="toggleBoardHistory()">
       <h2>历史看板 <span id="histToggle" style="font-size:12px;color:var(--text2);font-weight:normal">${hist.length ? '▸ 点击展开' : '（暂无归档）'}</span></h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap" onclick="event.stopPropagation()">
-        ${canEdit ? `<button class="btn btn-warning btn-sm" onclick="archiveBoard()">归档上月</button>` : ''}
+      <div style="display:flex;gap:8px;flex-wrap:nowrap;align-items:center;overflow-x:auto" onclick="event.stopPropagation()">
+        ${canEdit ? `<button class="btn btn-warning btn-sm" onclick="archiveBoard(progressMonthStr())">归档本月</button>` : ''}
         ${hist.length > 0 ? `<select id="histMonth" onchange="renderBoardHistory(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">
           ${hist.map(h => `<option value="${h.month}">${h.month} 归档</option>`).join('')}
         </select>` : ''}
         ${canEdit && hist.length > 0 ? `<button class="btn btn-danger btn-sm" onclick="deleteBoardArchive()">删除当前月份归档</button>` : ''}
       </div>
     </div>
-    <div id="boardHistoryDetail" style="display:none">${hist.length ? '<div style="text-align:center;color:var(--text2);padding:14px">请选择月份查看归档快照</div>' : `<div style="text-align:center;color:var(--text2);padding:14px">暂无历史归档。每月 1 号系统会自动归档上个月的看板；管理员也可点「归档上月」立即保存。</div>`}</div>
+    <div id="boardHistoryDetail" style="display:none">${hist.length ? '<div style="text-align:center;color:var(--text2);padding:14px">请选择月份查看归档快照</div>' : `<div style="text-align:center;color:var(--text2);padding:14px">暂无历史归档。每月 1 号系统会自动归档上个月的看板；管理员也可点「归档本月」立即保存当前月份的看板。</div>`}</div>
   </div>`;
 
   document.getElementById('moduleContent').innerHTML = html;
@@ -1422,9 +1457,11 @@ function toggleBoardHistory() {
   }
 }
 
-async function archiveBoard() {
+// 归档指定月份（默认归档当前招聘进度月份；用户需求：归档本月按钮）
+async function archiveBoard(month) {
+  month = month || progressMonthStr();
   try {
-    const r = await apiPost('/api/board-history/archive', {});
+    const r = await apiPost('/api/board-history/archive', { month });
     showToast(r.existed ? `${r.month} 已有归档，未重复保存` : `${r.month} 看板已归档（${r.positions||0} 个岗位）`);
     await render();
   } catch(e) { showToast(e.message); }
