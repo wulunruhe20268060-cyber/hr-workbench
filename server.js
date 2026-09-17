@@ -1953,6 +1953,8 @@ app.get('/api/kpi-trend', authMiddleware, (req, res) => {
     month: cur, prevMonth: prev,
     year: curY, prevYear: prevY,
     hasPrev, hasPrevYear,
+    // 团队成员数（普通成员/合同管理员无 /api/users 权限，英雄带靠这个数字兜底）
+    teamMembers: (db.users || []).filter(u => u.role === 'member').length,
     metrics: {
       interviews: build(curM.interviews, prevM.interviews, true),
       onboard: build(curM.onboard, prevM.onboard, true),

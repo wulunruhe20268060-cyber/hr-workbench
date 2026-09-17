@@ -1237,19 +1237,28 @@ async function handleTodayAction(action, id) {
 //   本月面试 / 本月入职 / 本月完成率 / 本月离职 / 本年面试 / 本年入职 / 本年离职 / 已完成待办 / 随访新人数 / 团队成员
 // 月份口径以「招聘进度」当前月为准（progressMonthStr()）。
 async function renderTeamOverview(positions, interviews, todos, hires, users) {
-  if (![0, 1].includes(currentTab) || !isAdmin()) { document.getElementById('teamOverview').innerHTML = ''; return; }
+  // 可见范围（2026-09-17 应需求调整）：
+  //   招聘看板(0)：仅管理员（该页本身只对管理员开放）
+  //   面试管理(1)：全部登录角色可「查看」——管理员 / 普通成员(member) / 合同管理员(contract_admin)
+  const heroVisible = (currentTab === 1) || (currentTab === 0 && isAdmin());
+  if (!heroVisible) { document.getElementById('teamOverview').innerHTML = ''; return; }
   const curMonth = progressMonthStr();
   // 本月面试数 = 当月有初面日期(firstInterviewDate)的面试条数（数据源：面试管理）
   const monthInterviews = interviews.filter(iv => iv.firstInterviewDate && bMonthOf(iv.firstInterviewDate) === curMonth).length;
   const completedTodos = todos.filter(t => t.completed).length;
   // 随访新人 = 新人随访模块总人数（hires 全量，不按是否已打卡筛选）
   const totalHires = (hires || []).length;
-  const memberCount = (users || []).filter(u => u.role === 'member').length;
+  // 团队成员：管理员可列全部用户；普通成员/合同管理员拿不到用户清单（/api/users 仅管理员），
+  // 回退用 /api/kpi-trend 返回的 teamMembers 计数，保证英雄带数字不缺项。
+  const usersMemberCount = (Array.isArray(users) && users.length) ? users.filter(u => u.role === 'member').length : null;
 
   // 真实环比：本月 vs 上月（完成率环比）；本年 vs 去年（本年累计环比）
   let trend = null;
   try { trend = await apiGet('/api/kpi-trend?month=' + encodeURIComponent(curMonth)); } catch(e) { trend = null; }
   const M = trend && trend.metrics ? trend.metrics : null;
+  const memberCount = usersMemberCount != null
+    ? usersMemberCount
+    : (trend && typeof trend.teamMembers === 'number' ? trend.teamMembers : '—');
   const trendHtml = (m, unit) => {
     if (!trend || !m) return '';
     // 完成率按百分点展示，其他按百分比展示
