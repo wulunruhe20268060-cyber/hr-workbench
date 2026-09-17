@@ -1270,11 +1270,25 @@ async function renderTeamOverview(positions, interviews, todos, hires, users) {
   const val = (m, fallback) => (M && m ? m.value : fallback);
   const fmtRate = (v) => (v == null ? '—' : (v + '%'));
 
+  // 本月入职兜底（接口不可用时用）：与招聘进度同口径 —— 当月各行「总入职」totalEntry 合计，
+  // totalEntry 为 0 的行回退该行四周入职之和；需求合计同样取进度当月各行 headcount 之和。
+  const progressEntrySum = Object.values(window._progressCur || {}).reduce((s, p) => {
+    const te = parseInt(p && p.totalEntry, 10) || 0;
+    if (te > 0) return s + te;
+    return s + ['week1','week2','week3','week4'].reduce((a, k) => a + (parseInt(p && p[k], 10) || 0), 0);
+  }, 0);
+  const progressHcSum = Object.values(window._progressCur || {}).reduce((s, p) => s + (parseInt(p && p.headcount, 10) || 0), 0);
+  const onboardFallback = progressEntrySum;
+  const rateFallback = progressHcSum > 0 ? Math.round(progressEntrySum / progressHcSum * 100) : null;
+  const onboardTip = (trend && trend.onboardSource === 'interviews')
+    ? '数据来源：面试表本月入职（该月暂无招聘进度行）'
+    : '数据来源：招聘进度模块当月入职合计（与招聘进度表完全同步）';
+
   document.getElementById('teamOverview').innerHTML = `
     <div class="team-overview">
       <div class="team-stat"><div class="kpi-icon">面</div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.interviews,monthInterviews)}</div>${trendHtml(M&&M.interviews,'mo')}</div><div class="label">本月面试</div></div></div>
-      <div class="team-stat"><div class="kpi-icon">入</div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.onboard,0)}</div>${trendHtml(M&&M.onboard,'mo')}</div><div class="label">本月入职</div></div></div>
-      <div class="team-stat"><div class="kpi-icon">率</div><div class="kpi-body"><div class="kpi-main"><div class="num">${fmtRate(M && M.completionRate && M.completionRate.value)}</div>${trendHtml(M&&M.completionRate,'rate')}</div><div class="label">本月完成率</div></div></div>
+      <div class="team-stat" title="${onboardTip}"><div class="kpi-icon">入</div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.onboard,onboardFallback)}</div>${trendHtml(M&&M.onboard,'mo')}</div><div class="label">本月入职</div></div></div>
+      <div class="team-stat"><div class="kpi-icon">率</div><div class="kpi-body"><div class="kpi-main"><div class="num">${fmtRate(M && M.completionRate && M.completionRate.value != null ? M.completionRate.value : rateFallback)}</div>${trendHtml(M&&M.completionRate,'rate')}</div><div class="label">本月完成率</div></div></div>
       <div class="team-stat"><div class="kpi-icon">离</div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.attrition,0)}</div>${trendHtml(M&&M.attrition,'mo')}</div><div class="label">本月离职</div></div></div>
       <div class="team-stat"><div class="kpi-icon">年</div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.yearInterviews,0)}</div>${trendHtml(M&&M.yearInterviews,'year')}</div><div class="label">本年面试</div></div></div>
       <div class="team-stat"><div class="kpi-icon">入</div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.yearOnboard,0)}</div>${trendHtml(M&&M.yearOnboard,'year')}</div><div class="label">本年入职</div></div></div>

@@ -1927,6 +1927,23 @@ function completionRate(onboard, total) {
 function totalHeadcount() {
   return (db.positions || []).reduce((a, p) => a + (parseInt(p.headcount, 10) || 0), 0);
 }
+// 招聘进度「入职」取数（2026-09-17 定稿，英雄带/完成率与招聘进度模块对齐）：
+//   单行 = 该行「总入职」totalEntry；totalEntry 为 0 时回退该行四周入职之和（与进度表合计行口径一致）
+function progressRowEntry(p) {
+  const te = parseInt(p && p.totalEntry, 10) || 0;
+  if (te > 0) return te;
+  return ['week1', 'week2', 'week3', 'week4'].reduce((s, k) => s + (parseInt(p && p[k], 10) || 0), 0);
+}
+// 某月招聘进度入职合计；rows=该月是否有进度行（无进度行的月份回退面试表口径，避免显示 0）
+function progressEntryTotal(month) {
+  const rows = (db.progress || []).filter(p => p && p.month === month);
+  return { rows: rows.length, value: rows.reduce((s, p) => s + progressRowEntry(p), 0) };
+}
+// 招聘进度当月需求合计（完成率分母，与进度表合计行「指标」列一致）
+function progressHeadcountTotal(month) {
+  return (db.progress || []).filter(p => p && p.month === month)
+    .reduce((s, p) => s + (parseInt(p.headcount, 10) || 0), 0);
+}
 app.get('/api/kpi-trend', authMiddleware, (req, res) => {
   const cur = (req.query.month && /^\d{4}-\d{2}$/.test(req.query.month)) ? req.query.month : curMonthStr();
   const prev = prevMonthOf(cur);
@@ -1936,8 +1953,15 @@ app.get('/api/kpi-trend', authMiddleware, (req, res) => {
   const prevY = prevYearOf(curY);
   const curYM = yearMetrics(curY);
   const prevYM = yearMetrics(prevY);
+  // 本月入职口径（2026-09-17 定稿）：以「招聘进度」当月各行入职合计为准，与招聘进度模块完全同步；
+  // 该月没有进度行时回退面试表口径（secondInterviewDate + 在岗），避免历史/未来月份显示 0。
+  const curEntry = progressEntryTotal(cur);
+  const prevEntry = progressEntryTotal(prev);
+  const curOnboard = curEntry.rows > 0 ? curEntry.value : curM.onboard;
+  const prevOnboard = prevEntry.rows > 0 ? prevEntry.value : prevM.onboard;
+  const curOnboardSrc = curEntry.rows > 0 ? 'progress' : 'interviews';
   const hasPrev = (db.boardHistory || []).some(h => h.month === prev)
-    || prevM.interviews > 0 || prevM.onboard > 0 || prevM.attrition > 0;
+    || prevM.interviews > 0 || prevOnboard > 0 || prevM.attrition > 0;
   const hasPrevYear = prevYM.interviews > 0 || prevYM.onboard > 0 || prevYM.attrition > 0;
   const build = (value, prevVal, increaseGood) => {
     const pct = pctTrend(value, prevVal);
@@ -1945,19 +1969,24 @@ app.get('/api/kpi-trend', authMiddleware, (req, res) => {
     const good = dir === 'flat' ? true : (dir === 'up' ? increaseGood : !increaseGood);
     return { value, prev: prevVal, pct, dir, good };
   };
-  // 完成率：本月入职 ÷ 招聘看板总岗位需求人数 × 100（分母=岗位需求合计，非当月面试数）
-  const hc = totalHeadcount();
-  const curRate = completionRate(curM.onboard, hc);
-  const prevRate = completionRate(prevM.onboard, hc);
+  // 完成率：本月入职（招聘进度口径）÷ 当月需求 × 100；
+  // 分母优先用「招聘进度当月需求合计」（与进度表合计行一致），无进度行时回退看板岗位需求合计
+  const hcMonth = progressHeadcountTotal(cur) || totalHeadcount();
+  const hcPrev = progressHeadcountTotal(prev) || totalHeadcount();
+  const curRate = completionRate(curOnboard, hcMonth);
+  const prevRate = completionRate(prevOnboard, hcPrev);
   res.json({
     month: cur, prevMonth: prev,
     year: curY, prevYear: prevY,
     hasPrev, hasPrevYear,
     // 团队成员数（普通成员/合同管理员无 /api/users 权限，英雄带靠这个数字兜底）
     teamMembers: (db.users || []).filter(u => u.role === 'member').length,
+    // 便于前端/排查：本月入职取自哪个数据源（progress=招聘进度 / interviews=面试表回退）
+    onboardSource: curOnboardSrc,
+    onboardHeadcount: hcMonth,
     metrics: {
       interviews: build(curM.interviews, prevM.interviews, true),
-      onboard: build(curM.onboard, prevM.onboard, true),
+      onboard: build(curOnboard, prevOnboard, true),
       attrition: build(curM.attrition, prevM.attrition, false),
       completionRate: build(curRate, prevRate, true),
       yearInterviews: build(curYM.interviews, prevYM.interviews, true),
