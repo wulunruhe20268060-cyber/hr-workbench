@@ -100,16 +100,21 @@ async function initStore() {
 
 // Save db -> Postgres (if active) or local file (fallback). Fire-and-forget safe.
 async function saveDb() {
-  try {
-    if (usePg && pgClient) {
-      await pgClient.query(
-        "INSERT INTO kv(key,value) VALUES('db',$1) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",
-        [JSON.stringify(db)]
-      );
-      return;
+  if (usePg && pgClient) {
+    // Postgres 写入失败会静默退到本地临时文件（Render 重新部署即丢失），
+    // 这里对瞬时故障重试一次，仍失败时才降级并打印明确告警（2026-09-17 加固）。
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await pgClient.query(
+          "INSERT INTO kv(key,value) VALUES('db',$1) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",
+          [JSON.stringify(db)]
+        );
+        return;
+      } catch (e) {
+        if (attempt === 0) { await new Promise(r => setTimeout(r, 300)); continue; }
+        console.error('PG save error（已重试一次仍失败，降级为文件写入，重启可能丢失）:', e.message);
+      }
     }
-  } catch (e) {
-    console.error('PG save error:', e.message);
   }
   // file fallback
   try {
