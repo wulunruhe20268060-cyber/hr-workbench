@@ -1553,61 +1553,71 @@ function renderBoardHistory(month) {
   const fallbackByPos = {};
   if (needFallback) {
     ivCache.forEach(iv => {
-      if (!iv || !iv.position || !iv.firstInterviewDate) return;
-      if (bMonthOf(iv.firstInterviewDate) !== month) return;
-      const r = (iv.result || '').toString();
-      if (r === '淘汰' || r === '失败' || r === '未通过') return;
-      const notes = (iv.notes || '').toString();
-      if (['淘汰', '失败', '未通过'].some(k => notes.includes(k))) return;
-      if (!fallbackByPos[iv.position]) fallbackByPos[iv.position] = { resume: 0, firstIv: 0 };
-      fallbackByPos[iv.position].resume++;
-      const advanced = bIsOnboarded(iv) || bIvResultIn(iv, ['通过', '待复试', 'Offer', '已入职', '待入职']);
-      if (advanced) fallbackByPos[iv.position].firstIv++;
+      if (!iv || !iv.position) return;
+      // 简历/初面：按 firstInterviewDate 月份
+      if (iv.firstInterviewDate && bMonthOf(iv.firstInterviewDate) === month) {
+        const r = (iv.result || '').toString();
+        if (r === '淘汰' || r === '失败' || r === '未通过') return;
+        const notes = (iv.notes || '').toString();
+        if (['淘汰', '失败', '未通过'].some(k => notes.includes(k))) return;
+        if (!fallbackByPos[iv.position]) fallbackByPos[iv.position] = { resume: 0, firstIv: 0, onboardMonth: 0 };
+        fallbackByPos[iv.position].resume++;
+        const advanced = bIsOnboarded(iv) || bIvResultIn(iv, ['通过', '待复试', 'Offer', '已入职', '待入职']);
+        if (advanced) fallbackByPos[iv.position].firstIv++;
+      }
+      // 本月入职：按 secondInterviewDate 月份（2026-09-17 应需求：入职列改本月口径，含已离职不剔除）
+      if (iv.secondInterviewDate && bMonthOf(iv.secondInterviewDate) === month) {
+        if (!fallbackByPos[iv.position]) fallbackByPos[iv.position] = { resume: 0, firstIv: 0, onboardMonth: 0 };
+        fallbackByPos[iv.position].onboardMonth++;
+      }
     });
   }
   // 数据源：优先读快照 monthlyStats（2026-09-17 应需求新增），缺失则 fallback 实时统计
   const stageKeys = ['resumeScreen','firstInterview','secondInterview','offer','onboard'];
   const sum = {}; stageKeys.forEach(k => sum[k] = 0);
   sum.headcount = 0;
-  sum.resume = 0; sum.firstIv = 0;
+  sum.resume = 0; sum.firstIv = 0; sum.onboardMonth = 0;
   snap.forEach(p => {
     sum.headcount += (p.headcount || 0);
     const st = p.stages || {};
     stageKeys.forEach(k => sum[k] += st[k] || 0);
-    const ms = p.monthlyStats || fallbackByPos[p.position] || { resume: 0, firstIv: 0 };
+    const ms = p.monthlyStats || fallbackByPos[p.position] || { resume: 0, firstIv: 0, onboardMonth: 0 };
     sum.resume += ms.resume || 0;
     sum.firstIv += ms.firstIv || 0;
+    sum.onboardMonth += ms.onboardMonth || 0;
   });
-  // 完成率口径 = 入职人数 ÷ 需求人数 × 100%（与 KPI 英雄带口径一致）
-  const completionRate = sum.headcount > 0 ? Math.round(sum.onboard / sum.headcount * 100) : 0;
+  // 完成率口径 = 本月入职 ÷ 需求人数 × 100%（2026-09-17 应需求：与入职列同口径，反映归档月份的当月完成度）
+  const completionRate = sum.headcount > 0 ? Math.round(sum.onboardMonth / sum.headcount * 100) : 0;
   if (snap.length === 0) { wrap.innerHTML = '<div style="text-align:center;color:var(--text2);padding:14px">该月归档无岗位数据</div>'; return; }
-  // KPI 卡片（5 张）：简历 / 初面 / 复试 / 完成率 / 入职
+  // KPI 卡片（5 张）：简历 / 初面 / 复试 / 完成率 / 入职 —— 入职改按本月入职统计（2026-09-17 应需求）
   const histLabels = ['简历筛选','初面','复试','完成率','入职'];
   const histIcons  = ['简','初','复','完','发'];
-  const histValues = [sum.resume, sum.firstIv, sum.secondInterview, completionRate + '%', sum.onboard];
-  let t = `<div style="margin-bottom:10px;font-size:13px;color:var(--text2)">归档时间：${escapeHtml(h.archivedAt||'')} ｜ ${snap.length} 个岗位 ｜ 完成率 ${completionRate}%</div>
+  const histValues = [sum.resume, sum.firstIv, sum.secondInterview, completionRate + '%', sum.onboardMonth];
+  let t = `<div style="margin-bottom:10px;font-size:13px;color:var(--text2)">归档时间：${escapeHtml(h.archivedAt||'')} ｜ ${snap.length} 个岗位 ｜ 完成率 ${completionRate}% ｜ 本月入职 ${sum.onboardMonth} 人</div>
     <div class="board-columns">${histLabels.map((lb,i)=>`<div class="board-col"><div class="board-col-icon">${histIcons[i]}</div><div class="board-col-body"><div class="board-col-count">${histValues[i]}</div><div class="board-col-label">${lb}</div></div></div>`).join('')}</div>
     <div style="overflow-x:auto;margin-top:10px"><table class="pos-table">
       <tr><th>岗位</th><th>部门</th><th>需求</th><th>简历</th><th>初面</th><th>复试</th><th>Offer</th><th>入职</th><th>完成率</th></tr>`;
   snap.forEach(p => {
     const st = p.stages || {};
     const hc = p.headcount || 0;
-    const ms = p.monthlyStats || fallbackByPos[p.position] || { resume: 0, firstIv: 0 };
-    const rate = hc > 0 ? Math.round((st.onboard || 0) / hc * 100) : 0;
+    const ms = p.monthlyStats || fallbackByPos[p.position] || { resume: 0, firstIv: 0, onboardMonth: 0 };
+    // 完成率 = 本月入职 ÷ 需求，与入职列同口径（2026-09-17 应需求）
+    const obMonth = ms.onboardMonth || 0;
+    const rate = hc > 0 ? Math.round(obMonth / hc * 100) : 0;
     t += `<tr><td><strong>${escapeHtml(p.position)}</strong></td><td>${escapeHtml(p.dept||'')}</td><td>${hc}</td>
       <td><strong style="color:var(--primary)">${ms.resume||0}</strong></td>
       <td><strong style="color:var(--primary)">${ms.firstIv||0}</strong></td>
       <td>${st.secondInterview||0}</td><td>${st.offer||0}</td>
-      <td><strong style="color:var(--primary)">${st.onboard||0}</strong></td>
+      <td><strong style="color:var(--primary)">${obMonth}</strong></td>
       <td><strong style="color:${rate>=100?'var(--success)':rate>0?'var(--primary)':'var(--text3)'}">${rate}%</strong></td></tr>`;
   });
-  // 合计行（最后一行）—— 2026-09-17 应需求新增
+  // 合计行（最后一行）—— 入职列改用本月入职口径（2026-09-17 应需求）
   t += `<tr class="row-total">
     <td><strong>合计</strong></td><td></td><td><strong>${sum.headcount}</strong></td>
     <td><strong style="color:var(--primary)">${sum.resume}</strong></td>
     <td><strong style="color:var(--primary)">${sum.firstIv}</strong></td>
     <td><strong>${sum.secondInterview}</strong></td><td><strong>${sum.offer}</strong></td>
-    <td><strong style="color:var(--primary)">${sum.onboard}</strong></td>
+    <td><strong style="color:var(--primary)">${sum.onboardMonth}</strong></td>
     <td><strong style="color:${completionRate>=100?'var(--success)':'var(--primary)'}">${completionRate}%</strong></td>
   </tr>`;
   t += `</table></div>`;

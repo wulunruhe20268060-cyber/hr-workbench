@@ -1740,8 +1740,8 @@ function prevMonthStr(d) {
   return monthStr(y, m);
 }
 // 生成某岗位集的看板快照（仅保留展示与统计所需字段）。
-// 接受 month（YYYY-MM）参数：按归档月份实时统计每个岗位的简历/初面/当月入职，写入 monthlyStats，
-// 这样历史看板能稳定复现「归档那一刻」的漏斗数据，不依赖实时 interviews 表。
+// 接受 month（YYYY-MM）参数：按归档月份实时统计每个岗位的简历/初面/当月入职（onboardMonth），
+// 写入 monthlyStats 字段 —— 历史看板能稳定复现「归档那一刻」的漏斗+本月入职，不依赖实时 interviews。
 // 月份为空时 monthlyStats 全为 0（兼容旧调用）。
 function boardSnapshotOf(list, month) {
   const yyyymm = (month && /^\d{4}-\d{2}$/.test(month)) ? month : '';
@@ -1749,20 +1749,27 @@ function boardSnapshotOf(list, month) {
   const byPos = {};
   if (yyyymm) {
     (db.interviews || []).forEach(iv => {
-      if (!iv || !iv.position || !iv.firstInterviewDate) return;
-      if (monthOfDate(iv.firstInterviewDate) !== yyyymm) return;
-      const r = (iv.result || '').toString();
-      if (r === '淘汰' || r === '失败' || r === '未通过') return;
-      const notes = (iv.notes || '').toString();
-      if (['淘汰', '失败', '未通过'].some(k => notes.includes(k))) return;
-      if (!byPos[iv.position]) byPos[iv.position] = { resume: 0, firstIv: 0 };
-      byPos[iv.position].resume++;
-      const advanced = isOnboarded(iv) || ['通过', '待复试', 'Offer', '已入职', '待入职'].includes(r);
-      if (advanced) byPos[iv.position].firstIv++;
+      if (!iv || !iv.position) return;
+      // 简历/初面：按 firstInterviewDate（初面日期）所在月
+      if (iv.firstInterviewDate && monthOfDate(iv.firstInterviewDate) === yyyymm) {
+        const r = (iv.result || '').toString();
+        if (r === '淘汰' || r === '失败' || r === '未通过') return;
+        const notes = (iv.notes || '').toString();
+        if (['淘汰', '失败', '未通过'].some(k => notes.includes(k))) return;
+        if (!byPos[iv.position]) byPos[iv.position] = { resume: 0, firstIv: 0, onboardMonth: 0 };
+        byPos[iv.position].resume++;
+        const advanced = isOnboarded(iv) || ['通过', '待复试', 'Offer', '已入职', '待入职'].includes(r);
+        if (advanced) byPos[iv.position].firstIv++;
+      }
+      // 本月入职：按 secondInterviewDate（入职时间）所在月，口径与本年入职一致 —— 含已离职不剔除（2026-09-17 应需求）
+      if (iv.secondInterviewDate && monthOfDate(iv.secondInterviewDate) === yyyymm) {
+        if (!byPos[iv.position]) byPos[iv.position] = { resume: 0, firstIv: 0, onboardMonth: 0 };
+        byPos[iv.position].onboardMonth++;
+      }
     });
   }
   return (list || []).map(p => {
-    const ms = byPos[p.position] || { resume: 0, firstIv: 0 };
+    const ms = byPos[p.position] || { resume: 0, firstIv: 0, onboardMonth: 0 };
     return {
       position: p.position, dept: p.dept || '', headcount: p.headcount || 0,
       deadline: p.deadline || '', status: p.status || 'active',
@@ -1774,12 +1781,13 @@ function boardSnapshotOf(list, month) {
         offer: (p.stages && p.stages.offer) || 0,
         onboard: (p.stages && p.stages.onboard) || 0
       },
-      // 按归档月份实时统计的漏斗数据（2026-09-17 应需求新增，历史快照缺此字段时前端 fallback 实时统计）
+      // 按归档月份实时统计：简历 / 初面 / 本月入职（2026-09-17 应需求：入职列改按归档月份取数）
       monthlyStats: yyyymm ? {
         resume: ms.resume,
         firstIv: ms.firstIv,
+        onboardMonth: ms.onboardMonth,
         syncedAt: new Date().toISOString().slice(0, 19).replace('T', ' ')
-      } : { resume: 0, firstIv: 0 }
+      } : { resume: 0, firstIv: 0, onboardMonth: 0 }
     };
   });
 }
