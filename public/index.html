@@ -1228,10 +1228,8 @@ async function renderTeamOverview(positions, interviews, todos, hires, users) {
   // 本月面试数 = 当月有初面日期(firstInterviewDate)的面试条数（数据源：面试管理）
   const monthInterviews = interviews.filter(iv => iv.firstInterviewDate && bMonthOf(iv.firstInterviewDate) === curMonth).length;
   const completedTodos = todos.filter(t => t.completed).length;
-  const activeHires = hires.filter(h => {
-    const allCheckins = h.periods ? h.periods.reduce((sum,p) => sum.concat(p.checkins||[]), []) : (h.checkins||[]);
-    return allCheckins.length > 0;
-  }).length;
+  // 随访新人 = 新人随访模块总人数（hires 全量，不按是否已打卡筛选）
+  const totalHires = (hires || []).length;
   const memberCount = (users || []).filter(u => u.role === 'member').length;
 
   // 真实环比：本月 vs 上月（完成率环比）；本年 vs 去年（本年累计环比）
@@ -1259,7 +1257,7 @@ async function renderTeamOverview(positions, interviews, todos, hires, users) {
       <div class="team-stat"><div class="kpi-icon">入</div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.yearOnboard,0)}</div>${trendHtml(M&&M.yearOnboard,'year')}</div><div class="label">本年入职</div></div></div>
       <div class="team-stat"><div class="kpi-icon">离</div><div class="kpi-body"><div class="kpi-main"><div class="num">${val(M&&M.yearAttrition,0)}</div>${trendHtml(M&&M.yearAttrition,'year')}</div><div class="label">本年离职</div></div></div>
       <div class="team-stat"><div class="kpi-icon">办</div><div class="kpi-body"><div class="kpi-main"><div class="num">${completedTodos}</div></div><div class="label">已完成待办</div></div></div>
-      <div class="team-stat"><div class="kpi-icon">随</div><div class="kpi-body"><div class="kpi-main"><div class="num">${activeHires}</div></div><div class="label">随访新人数</div></div></div>
+      <div class="team-stat"><div class="kpi-icon">随</div><div class="kpi-body"><div class="kpi-main"><div class="num">${totalHires}</div></div><div class="label">随访新人数</div></div></div>
       <div class="team-stat"><div class="kpi-icon">团</div><div class="kpi-body"><div class="kpi-main"><div class="num">${memberCount}</div></div><div class="label">团队成员</div></div></div>
     </div>`;
 }
@@ -1312,10 +1310,16 @@ async function renderBoard(positions, boardHistory, interviews) {
   interviews = interviews || [];
   let html = '';
   const canEdit = isAdmin();
-  
-  html += `<div class="card">
-    <div class="card-header"><h2>岗位列表</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+
+  const bMonth = progressMonthStr();
+  const bYear = bMonth.slice(0,4);
+  // 各岗位指标：统一从面试管理面试表实时统计（供岗位详情表格列使用）
+  const boardStats = {};
+  positions.forEach(p => { boardStats[p.position] = boardStat(p.position, interviews, bMonth, bYear); });
+
+  // 顶部英雄带已覆盖全局 KPI，岗位列表卡片不再重复展示漏斗带（2026-09-17 应需求移除）；
+  // 操作按钮（新增岗位/批量编辑/上传表格）合并到「岗位详情」卡片头部，避免出现空卡片
+  const boardActions = `<div style="display:flex;gap:8px;flex-wrap:wrap">
         ${canEdit ? `<button class="btn btn-primary btn-sm" onclick="showAddPosition()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>新增岗位</button>` : ''}
         ${canEdit && positions.length > 0 ? `<button class="btn btn-warning btn-sm" onclick="toggleBatchEdit()">
@@ -1324,39 +1328,9 @@ async function renderBoard(positions, boardHistory, interviews) {
         ${canEdit ? `<button class="btn btn-success btn-sm" onclick="document.getElementById('positionUpload').click()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>上传表格
         </button><input type="file" id="positionUpload" accept=".csv,.txt,.xlsx,.xls" style="display:none" onchange="handlePositionUpload(event)">` : ''}
-      </div>
-    </div>`;
-  
-  const bMonth = progressMonthStr();
-  const bYear = bMonth.slice(0,4);
-  // 各岗位指标：全部 4 项（简历/初面/本月入职/本年入职）统一从面试管理面试表实时统计
-  const boardStats = {};
-  positions.forEach(p => { boardStats[p.position] = boardStat(p.position, interviews, bMonth, bYear); });
-  const sumResume = positions.reduce((a,p)=>a+boardStats[p.position].resume,0);
-  const sumFirst = positions.reduce((a,p)=>a+boardStats[p.position].firstIv,0);
-  const sumSecond = positions.reduce((a,p)=>a+(p.stages&&p.stages.secondInterview||0),0);
-  const sumOffer = positions.reduce((a,p)=>a+(p.stages&&p.stages.offer||0),0);
-  const sumObMonth = positions.reduce((a,p)=>a+boardStats[p.position].obMonth,0);
-  const sumObYear = positions.reduce((a,p)=>a+boardStats[p.position].obYear,0);
-  const funnel = [
-    { label:'简历筛选', icon:'简', count:sumResume },
-    { label:'初面', icon:'初', count:sumFirst },
-    { label:'复试', icon:'复', count:sumSecond },
-    { label:'Offer', icon:'发', count:sumOffer },
-    { label:'本月入职', icon:'入', count:sumObMonth },
-    { label:'本年入职', icon:'年', count:sumObYear }
-  ];
-  const total = funnel.reduce((a,f)=>a+f.count,0);
+      </div>`;
 
-  html += `<div class="board-columns">
-    ${funnel.map(f => `
-      <div class="board-col"><div class="board-col-icon">${f.icon}</div><div class="board-col-body"><div class="board-col-count">${f.count}</div><div class="board-col-label">${f.label}</div></div></div>
-    `).join('')}
-  </div>`;
-  if (total>0) html += `<div style="text-align:center;font-size:13px;color:var(--text2);margin-top:10px">${positions.length} 个岗位 | 管道中 ${total} 人</div>`;
-  html += `</div>`;
-  
-  html += `<div class="card"><div class="card-header"><h2>岗位详情</h2></div>`;
+  html += `<div class="card"><div class="card-header"><h2>岗位详情</h2>${boardActions}</div>`;
   html += `<div class="search-filter-bar" style="flex-wrap:nowrap;gap:10px">
     <input class="search-input" id="posSearch" style="flex:2 1 0;min-width:0" placeholder="搜索岗位 / 部门" oninput="filterPositions()">
     <select class="filter-select" id="posFlow" style="flex:1 1 0;min-width:0" onchange="filterPositions()">

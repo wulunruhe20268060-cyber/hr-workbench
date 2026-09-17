@@ -1734,59 +1734,35 @@ function boardSnapshotOf(list) {
   }));
 }
 // 某月的真实指标：面试数(按 firstInterviewDate 所在月) + 入职/流失(按对应日期所在月)
-// 全部从「面试管理」interviews 表统计，与招聘看板岗位列表英雄带口径一致。
+// 全部从「面试管理」interviews 表实时统计，与招聘看板口径一致（2026-09-17 定稿）：
+//   本月面试 = 当月有初面日期(firstInterviewDate)的条数
+//   本月入职 = 当月有入职时间(secondInterviewDate) 且 仍在岗 → 与招聘看板「本月入职」完全同口径
+//   本月离职 = 当月有离职时间(departureDate)的条数（不看结果字段，有离职时间即计入）
 function monthMetrics(yyyymm) {
   // 本月面试数 = 当月有初面日期(firstInterviewDate)的面试条数（数据源：面试管理）
   const interviewsCount = (db.interviews || []).filter(iv =>
     iv.firstInterviewDate && monthOfDate(iv.firstInterviewDate) === yyyymm
   ).length;
   let onboard = 0, attrition = 0;
-  // 优先取当月 boardHistory 快照 summary（避免事后改面试表导致历史月度数字被覆盖）
-  const snap = (db.boardHistory || []).find(h => h.month === yyyymm);
-  if (snap && snap.summary) {
-    onboard = snap.summary.onboard || 0;
-    attrition = snap.summary.attrition || 0;
-  } else {
-    (db.interviews || []).forEach(iv => {
-      // 本月入职数 = 当月有入职时间（secondInterviewDate）且仍在岗的面试条数
-      if (isOnboarded(iv) && monthOfDate(iv.secondInterviewDate) === yyyymm) onboard++;
-      // 本月流失数 = 当月有离职时间（departureDate）或备注离职关键词的面试条数
-      if (isDeparted(iv) && monthOfDate(iv.departureDate) === yyyymm) attrition++;
-    });
-  }
+  (db.interviews || []).forEach(iv => {
+    // 本月入职数 = 当月有入职时间（secondInterviewDate）且仍在岗的面试条数
+    if (isOnboarded(iv) && iv.secondInterviewDate && monthOfDate(iv.secondInterviewDate) === yyyymm) onboard++;
+    // 本月离职数 = 当月有离职时间（departureDate）的面试条数
+    if (iv.departureDate && monthOfDate(iv.departureDate) === yyyymm) attrition++;
+  });
   return { interviews: interviewsCount, onboard, attrition };
 }
-// 某年的真实指标：本年面试数(按 firstInterviewDate 所在年) + 本年入职/流失(按对应日期所在年)
-// 全部从「面试管理」interviews 表统计，与 KPI 英雄带口径一致。
-// 入职/流失优先用 boardHistory 同年累计 summary（避免事后改面试表导致历史年度数字被覆盖）；
-// 若该年存在部分归档（如 9 月已归档但 10-12 月未到），未归档月回退实时面试表统计并合并。
+// 某年的真实指标（2026-09-17 定稿口径，全部实时统计、不再合并归档快照）：
+//   本年面试 = 本年有初面日期(firstInterviewDate)的条数
+//   本年入职 = 本年有入职时间(secondInterviewDate)的条数（包含后来已离职的，不剔除）
+//   本年离职 = 本年有离职时间(departureDate)的条数
 function yearMetrics(yyyy) {
+  const y = String(yyyy);
   let interviews = 0, onboard = 0, attrition = 0;
   (db.interviews || []).forEach(iv => {
-    if (iv.firstInterviewDate && /^(\d{4})-/.exec(iv.firstInterviewDate)) {
-      if (RegExp.$1 === String(yyyy)) interviews++;
-    }
-  });
-  // 入职/流失：按"归档优先级"分两段汇总
-  // (a) 已归档月份：取快照 summary（不被事后改动污染）
-  const archivedMonths = new Set();
-  (db.boardHistory || []).forEach(h => {
-    if (h.month && h.month.slice(0, 4) === String(yyyy) && h.summary) {
-      onboard += (h.summary.onboard || 0);
-      attrition += (h.summary.attrition || 0);
-      archivedMonths.add(h.month);
-    }
-  });
-  // (b) 未归档月份：实时面试表统计（一般是当前月和未来月份）
-  (db.interviews || []).forEach(iv => {
-    if (isOnboarded(iv) && iv.secondInterviewDate && iv.secondInterviewDate.slice(0, 4) === String(yyyy)) {
-      const m = monthOfDate(iv.secondInterviewDate);
-      if (m && !archivedMonths.has(m)) onboard++;
-    }
-    if (isDeparted(iv) && iv.departureDate && iv.departureDate.slice(0, 4) === String(yyyy)) {
-      const m = monthOfDate(iv.departureDate);
-      if (m && !archivedMonths.has(m)) attrition++;
-    }
+    if (iv.firstInterviewDate && iv.firstInterviewDate.slice(0, 4) === y) interviews++;
+    if (iv.secondInterviewDate && iv.secondInterviewDate.slice(0, 4) === y) onboard++;
+    if (iv.departureDate && iv.departureDate.slice(0, 4) === y) attrition++;
   });
   return { interviews, onboard, attrition };
 }
@@ -1855,9 +1831,13 @@ function prevYearOf(yyyy) {
   if (!m) return String(new Date().getFullYear() - 1);
   return String(parseInt(m[1], 10) - 1);
 }
-function completionRate(onboard, interviews) {
-  if (!interviews) return 0;
-  return Math.round((onboard / interviews) * 100);
+function completionRate(onboard, total) {
+  if (!total) return 0;
+  return Math.round((onboard / total) * 100);
+}
+// 招聘看板总岗位需求人数 = positions 表所有岗位 headcount 之和（完成率分母，2026-09-17 定稿）
+function totalHeadcount() {
+  return (db.positions || []).reduce((a, p) => a + (parseInt(p.headcount, 10) || 0), 0);
 }
 app.get('/api/kpi-trend', authMiddleware, (req, res) => {
   const cur = (req.query.month && /^\d{4}-\d{2}$/.test(req.query.month)) ? req.query.month : curMonthStr();
@@ -1877,9 +1857,10 @@ app.get('/api/kpi-trend', authMiddleware, (req, res) => {
     const good = dir === 'flat' ? true : (dir === 'up' ? increaseGood : !increaseGood);
     return { value, prev: prevVal, pct, dir, good };
   };
-  // 完成率：本月入职 / 本月面试 × 100（口径=面试到入职的当月转化率）
-  const curRate = completionRate(curM.onboard, curM.interviews);
-  const prevRate = completionRate(prevM.onboard, prevM.interviews);
+  // 完成率：本月入职 ÷ 招聘看板总岗位需求人数 × 100（分母=岗位需求合计，非当月面试数）
+  const hc = totalHeadcount();
+  const curRate = completionRate(curM.onboard, hc);
+  const prevRate = completionRate(prevM.onboard, hc);
   res.json({
     month: cur, prevMonth: prev,
     year: curY, prevYear: prevY,
