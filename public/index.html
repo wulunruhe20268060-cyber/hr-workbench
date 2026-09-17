@@ -512,6 +512,19 @@ label{display:block;font-size:13px;font-weight:500;color:var(--text2);margin-bot
 .progress-table td input:focus,.progress-table td select:focus{border-color:var(--primary);background:#fff}
 .progress-table .row-total{background:#E8F3FF;font-weight:700}
 .progress-table .row-total td{border-top:2px solid var(--primary)}
+/* 招聘进度表：岗位列锁定冻结（左右滚动时固定可见） */
+.progress-table td.sticky-pos{position:sticky;left:0;z-index:2;background:#fff;min-width:120px}
+.progress-table.has-check td.sticky-pos{left:40px}
+.progress-table th.sticky-pos{position:sticky;left:0;z-index:3;background:#EEF4FF;min-width:120px}
+.progress-table.has-check th.sticky-pos{left:40px}
+.progress-table tbody tr:nth-child(even) td.sticky-pos{background:#F8FBFF}
+.progress-table tbody tr:hover td.sticky-pos{background:#E8F3FF}
+.progress-table tr.row-total td.sticky-pos{background:#E8F3FF}
+@media (max-width: 768px) {
+  .progress-table td.sticky-pos{min-width:100px;font-size:12px}
+  .progress-table.has-check td.sticky-pos{left:36px}
+  .progress-table.has-check th.sticky-pos{left:36px}
+}
 .progress-tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;white-space:nowrap}
 .progress-tag.high{background:#FFECE8;color:#CB272D}
 .progress-tag.mid{background:#FFF7E8;color:#873800}
@@ -3085,10 +3098,10 @@ function renderProgress(progress) {
       <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="document.querySelectorAll('.row-checkbox').forEach(cb=>cb.checked=false);updateBatchDeleteBar()">取消</button>
     </div>`;
   }
-  html += `<div style="overflow-x:auto"><table class="progress-table">
+  html += `<div style="overflow-x:auto"><table class="progress-table ${canEdit?'has-check':''}">
     <tr>
       ${canEdit?'<th style="width:40px"><input type="checkbox" onchange="toggleAllRows(this)" title="全选/取消全选"></th>':''}
-      <th style="width:100px">岗位</th><th style="width:50px">指标</th><th style="width:130px">部门</th>
+      <th class="sticky-pos" style="width:120px">岗位</th><th style="width:50px">指标</th><th style="width:130px">部门</th>
       <th style="width:45px">优先</th><th style="width:45px">紧急</th><th style="width:45px">难度</th>
       <th style="width:180px">进度节点</th>
       <th style="width:50px">第1周</th><th style="width:50px">第2周</th><th style="width:50px">第3周</th><th style="width:50px">第4周</th>
@@ -3100,7 +3113,7 @@ function renderProgress(progress) {
   progress.forEach(p => {
     html += `<tr id="prog-row-${p.id}">
       ${canEdit?`<td><input type="checkbox" class="row-checkbox" data-id="${p.id}" onchange="updateBatchDeleteBar()"></td>`:''}
-      <td class="row-position"><input value="${escapeHtml(p.position)}" onchange="markDirty('${p.id}','position',this.value)"></td>
+      <td class="row-position sticky-pos"><input value="${escapeHtml(p.position)}" onchange="markDirty('${p.id}','position',this.value)"></td>
       <td><input type="number" value="${p.headcount||0}" min="0" style="width:40px" onchange="markDirty('${p.id}','headcount',parseInt(this.value)||0)"></td>
       <td class="row-dept"><input value="${escapeHtml(p.dept||'')}" onchange="markDirty('${p.id}','dept',this.value)" placeholder="部门" style="text-align:left"></td>
       <td><select onchange="markDirty('${p.id}','priority',this.value)"><option value="高" ${p.priority==='高'?'selected':''}>高</option><option value="中" ${p.priority==='中'?'selected':''}>中</option><option value="低" ${p.priority==='低'?'selected':''}>低</option></select></td>
@@ -3122,7 +3135,7 @@ function renderProgress(progress) {
   // Total row
   html += `<tr class="row-total">
     ${canEdit?'<td></td>':''}
-    <td class="row-position">合计</td>
+    <td class="row-position sticky-pos">合计</td>
     <td>${totalHeadcount}</td><td></td><td></td><td></td><td></td><td></td>
     <td>${totalW1}</td><td>${totalW2}</td><td>${totalW3}</td><td>${totalW4}</td>
     <td>${totalEntry}</td><td style="color:${totalShortage>0?'var(--danger)':'var(--success)'}">${totalShortage}</td>
